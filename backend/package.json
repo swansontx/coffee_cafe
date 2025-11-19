@@ -1,0 +1,24 @@
+{
+  "name": "coffee-tracker-backend",
+  "version": "1.0.0",
+  "description": "Backend API for coffee brew tracking application",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "init-db": "node src/utils/initDatabase.js",
+    "seed": "node src/utils/seedDatabase.js"
+  },
+  "keywords": ["coffee", "espresso", "tracking", "brewing"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "better-sqlite3": "^9.2.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

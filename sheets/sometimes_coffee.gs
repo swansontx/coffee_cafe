@@ -10,9 +10,10 @@
 //   5. After that, use the "☕ Sometimes Coffee" menu weekly
 // ================================================================
 
-const SHEET_INV  = 'Inventory';
-const SHEET_PLAN = 'Program Planner';
-const SHEET_DASH = 'Coverage Dashboard';
+const SHEET_INV    = 'Inventory';
+const SHEET_PLAN   = 'Program Planner';
+const SHEET_DASH   = 'Coverage Dashboard';
+const SHEET_STATUS = 'Current Status';
 
 // Inventory column indices — 0-based for array/getValues() access
 const IC = {
@@ -42,7 +43,8 @@ function onOpen() {
     { name: 'Advance to Next Week',      functionName: 'advanceWeek'       },
     { name: 'Refresh Planner Dropdowns', functionName: 'refreshDropdowns'  },
     null,
-    { name: 'Full Setup (first run)',    functionName: 'setupAll'          }
+    { name: 'Full Setup (first run)',    functionName: 'setupAll'          },
+    { name: 'Rebuild Status Sheet',      functionName: 'rebuildStatusSheet'}
   ]);
 }
 
@@ -51,15 +53,22 @@ function setupAll() {
   setupInventorySheet(ss);
   setupPlannerSheet(ss);
   setupDashboardSheet(ss);
+  setupStatusSheet(ss);
   refreshWeekDates();
   refreshDropdowns();
   SpreadsheetApp.getUi().alert(
     '✓ Sometimes Coffee is ready!\n\n' +
     '1. Add entries in the Inventory sheet\n' +
     '2. Use Program Planner to assign coffees each week\n' +
-    '3. Check Coverage Dashboard for red/yellow flags\n\n' +
+    '3. Check Coverage Dashboard for red/yellow flags\n' +
+    '4. Check Current Status for live counts and lbs\n\n' +
     'Every Monday: ☕ menu → Advance to Next Week'
   );
+}
+
+function rebuildStatusSheet() {
+  setupStatusSheet(SpreadsheetApp.getActiveSpreadsheet());
+  SpreadsheetApp.getUi().alert('✓ Current Status sheet rebuilt.');
 }
 
 // ================================================================
@@ -399,6 +408,7 @@ function advanceWeek() {
 }
 
 // Updates week date headers in the Planner (called by advanceWeek and setupAll)
+// Shows Wednesday as the week start — shop is open Wed–Sun
 function refreshWeekDates() {
   const ss   = SpreadsheetApp.getActiveSpreadsheet();
   const plan = ss.getSheetByName(SHEET_PLAN);
@@ -406,15 +416,18 @@ function refreshWeekDates() {
 
   const today  = new Date();
   const day    = today.getDay();
+  // Find this week's Monday, then step forward to Wednesday (+2)
   const monday = new Date(today);
   monday.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
   monday.setHours(0, 0, 0, 0);
+  const wednesday = new Date(monday);
+  wednesday.setDate(monday.getDate() + 2);
 
   [0,1,2,3].forEach(offset => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + offset * 7);
+    const d = new Date(wednesday);
+    d.setDate(wednesday.getDate() + offset * 7);
     const end = new Date(d);
-    end.setDate(d.getDate() + 5);
+    end.setDate(d.getDate() + 4); // Wed + 4 = Sun
 
     const cell = plan.getRange(1, offset + 2);
     cell.setValue(d)
@@ -428,7 +441,7 @@ function refreshWeekDates() {
           end.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})
         );
   });
-  Logger.log('✓ Week dates updated');
+  Logger.log('✓ Week dates updated (Wed–Sun)');
 }
 
 // Refreshes planner dropdown options from current inventory state
@@ -505,4 +518,150 @@ function getAvailableCoffees(invData, programName, weekDate, burnRate) {
     if (lbsLeft > 0) result.push(displayName);
   }
   return result;
+}
+
+// ================================================================
+// SHEET 4: CURRENT STATUS
+// ================================================================
+
+function setupStatusSheet(ss) {
+  let sheet = ss.getSheetByName(SHEET_STATUS);
+  if (!sheet) sheet = ss.insertSheet(SHEET_STATUS, 3);
+  else { sheet.clear(); sheet.clearConditionalFormatRules(); }
+
+  sheet.setColumnWidth(1, 170);
+  sheet.setColumnWidth(2, 85);
+  sheet.setColumnWidth(3, 110);
+  sheet.setColumnWidth(4, 135);
+
+  const hdrBg = '#2C1810', hdrFg = '#FFFFFF';
+  const subBg = '#4A2C17', subFg = '#FFFFFF';
+  const greenBg = '#1A3A2A', greenSub = '#2A5A3A';
+
+  // ── Section 1: Brewing Pipeline by Status ──
+  sheet.getRange(1,1,1,4).merge()
+    .setValue('BREWING PIPELINE')
+    .setBackground(hdrBg).setFontColor(hdrFg).setFontWeight('bold').setFontSize(12);
+
+  sheet.getRange(2,1,1,4)
+    .setValues([['Status','# Coffees','Total Alloc lbs','Notes']])
+    .setBackground(subBg).setFontColor(subFg).setFontWeight('bold');
+
+  const brewStatuses = [
+    ['Active',      'Currently on bar'],
+    ['Ready',       'Rested — ready to activate'],
+    ['Resting',     'Waiting for rest window'],
+    ['In Transit',  'Ordered, en route'],
+    ['Ordered',     'Order placed, not shipped'],
+    ['Finished',    'All lbs used'],
+  ];
+  brewStatuses.forEach(([status, note], i) => {
+    const row = i + 3;
+    sheet.getRange(row, 1).setValue(status).setFontWeight('bold');
+    sheet.getRange(row, 2).setFormula(
+      `=COUNTIFS(Inventory!A:A,"brewing",Inventory!X:X,"${status}")`);
+    sheet.getRange(row, 3).setFormula(
+      `=IFERROR(SUMPRODUCT((Inventory!A2:A1000="brewing")*(Inventory!X2:X1000="${status}"),` +
+      `IF(ISNUMBER(Inventory!O2:O1000),Inventory!O2:O1000,0)+` +
+      `IF(ISNUMBER(Inventory!P2:P1000),Inventory!P2:P1000,0)),0)`);
+    sheet.getRange(row, 3).setNumberFormat('0.0 "lbs"');
+    sheet.getRange(row, 4).setValue(note).setFontColor('#888888').setFontSize(9);
+    if (i % 2 === 0) sheet.getRange(row, 1, 1, 4).setBackground('#FAFAFA');
+  });
+
+  // ── Section 2: By Program ──
+  const p2 = 10;
+  sheet.getRange(p2,1,1,4).merge()
+    .setValue('BY PROGRAM')
+    .setBackground(hdrBg).setFontColor(hdrFg).setFontWeight('bold').setFontSize(12);
+
+  sheet.getRange(p2+1,1,1,4)
+    .setValues([['Program','Active Coffee(s)','Ready to Pull','In Pipeline (not Finished)']])
+    .setBackground(subBg).setFontColor(subFg).setFontWeight('bold');
+
+  const programs = ['House Espresso','Featured Espresso','Batch Drip','Pour Over'];
+  programs.forEach((prog, i) => {
+    const row = p2 + 2 + i;
+    sheet.getRange(row, 1).setValue(prog).setFontWeight('bold');
+    sheet.getRange(row, 2).setFormula(
+      `=IFERROR(TEXTJOIN(", ",TRUE,FILTER(Inventory!L:L,` +
+      `(Inventory!A:A="brewing")*` +
+      `((Inventory!M:M="${prog}")+(Inventory!N:N="${prog}"))*(Inventory!X:X="Active"))),"—")`);
+    sheet.getRange(row, 3).setFormula(
+      `=IFERROR(TEXTJOIN(", ",TRUE,FILTER(Inventory!L:L,` +
+      `(Inventory!A:A="brewing")*` +
+      `((Inventory!M:M="${prog}")+(Inventory!N:N="${prog}"))*(Inventory!X:X="Ready"))),"—")`);
+    sheet.getRange(row, 4).setFormula(
+      `=COUNTIFS(Inventory!A:A,"brewing",Inventory!M:M,"${prog}",Inventory!X:X,"<>Finished")+` +
+      `COUNTIFS(Inventory!A:A,"brewing",Inventory!N:N,"${prog}",Inventory!X:X,"<>Finished")`);
+    if (i % 2 === 0) sheet.getRange(row, 1, 1, 4).setBackground('#FAFAFA');
+  });
+
+  // ── Section 3: Retail Inventory ──
+  const p3 = 16;
+  sheet.getRange(p3,1,1,4).merge()
+    .setValue('RETAIL INVENTORY')
+    .setBackground(greenBg).setFontColor(hdrFg).setFontWeight('bold').setFontSize(12);
+
+  sheet.getRange(p3+1,1,1,4)
+    .setValues([['Freshness','# Coffees','Bags On Hand','Avg Wks Supply']])
+    .setBackground(greenSub).setFontColor(hdrFg).setFontWeight('bold');
+
+  const freshStatuses = ['OK','Watch','Urgent','Expired'];
+  freshStatuses.forEach((status, i) => {
+    const row = p3 + 2 + i;
+    sheet.getRange(row, 1).setValue(status).setFontWeight('bold');
+    sheet.getRange(row, 2).setFormula(
+      `=COUNTIFS(Inventory!A:A,"retail",Inventory!AG:AG,"${status}")`);
+    sheet.getRange(row, 3).setFormula(
+      `=IFERROR(SUMPRODUCT((Inventory!A2:A1000="retail")*(Inventory!AG2:AG1000="${status}"),` +
+      `IF(ISNUMBER(Inventory!Y2:Y1000),Inventory!Y2:Y1000,0)),0)`);
+    sheet.getRange(row, 4).setFormula(
+      `=IFERROR(AVERAGEIFS(Inventory!AF:AF,Inventory!A:A,"retail",Inventory!AG:AG,"${status}"),"—")`);
+    sheet.getRange(row, 4).setNumberFormat('0.0');
+    if (i % 2 === 0) sheet.getRange(row, 1, 1, 4).setBackground('#F0FAF3');
+  });
+
+  // Total row
+  const totalRow = p3 + 2 + freshStatuses.length + 1;
+  sheet.getRange(totalRow,1,1,4)
+    .setValues([['TOTAL','=COUNTIF(Inventory!A:A,"retail")',
+      '=IFERROR(SUMPRODUCT((Inventory!A2:A1000="retail")*IF(ISNUMBER(Inventory!Y2:Y1000),Inventory!Y2:Y1000,0)),0)',
+      '']])
+    .setBackground('#E8F6EE').setFontWeight('bold');
+  sheet.getRange(totalRow, 3).setNumberFormat('0');
+
+  // Conditional formatting — freshness label column
+  const freshLabelRange = [sheet.getRange(`A${p3+2}:A${p3+5}`)];
+  sheet.setConditionalFormatRules([
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('OK')
+      .setBackground('#D4EDDA').setFontColor('#155724').setRanges(freshLabelRange).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Watch')
+      .setBackground('#FFF3CD').setFontColor('#856404').setRanges(freshLabelRange).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Urgent')
+      .setBackground('#FFE8CC').setFontColor('#7D3A00').setRanges(freshLabelRange).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Expired')
+      .setBackground('#F8D7DA').setFontColor('#721C24').setRanges(freshLabelRange).build(),
+  ]);
+
+  // Brewing status label column conditional formatting
+  const brewLabelRange = [sheet.getRange('A3:A8')];
+  const existingRules = sheet.getConditionalFormatRules();
+  sheet.setConditionalFormatRules([...existingRules,
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Active')
+      .setBackground('#D4EDDA').setFontColor('#155724').setRanges(brewLabelRange).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Ready')
+      .setBackground('#CCF5F1').setFontColor('#0C5460').setRanges(brewLabelRange).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Resting')
+      .setBackground('#E2D9F3').setFontColor('#4B2B7A').setRanges(brewLabelRange).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('In Transit')
+      .setBackground('#CCE5FF').setFontColor('#004085').setRanges(brewLabelRange).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Ordered')
+      .setBackground('#F8F9FA').setFontColor('#6C757D').setRanges(brewLabelRange).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Finished')
+      .setBackground('#E2E3E5').setFontColor('#383D41').setRanges(brewLabelRange).build(),
+  ]);
+
+  sheet.setFrozenRows(2);
+  Logger.log('✓ Status sheet ready');
 }

@@ -39,10 +39,10 @@ const PR = {
 
 function onOpen() {
   SpreadsheetApp.getActiveSpreadsheet().addMenu('☕ Sometimes Coffee', [
-    { name: 'Refresh Week Dates',        functionName: 'refreshWeekDates'  },
+    { name: 'Advance to Next Week',      functionName: 'advanceWeek'       },
     { name: 'Refresh Planner Dropdowns', functionName: 'refreshDropdowns'  },
-    { name: '—',                         functionName: null                 },
-    { name: 'Full Setup (first run)',    functionName: 'setupAll'           }
+    null,
+    { name: 'Full Setup (first run)',    functionName: 'setupAll'          }
   ]);
 }
 
@@ -55,10 +55,10 @@ function setupAll() {
   refreshDropdowns();
   SpreadsheetApp.getUi().alert(
     '✓ Sometimes Coffee is ready!\n\n' +
-    '1. Add inventory entries in the Inventory sheet\n' +
-    '2. Use the Program Planner to assign coffees each week\n' +
-    '3. Check the Coverage Dashboard for red/yellow flags\n\n' +
-    'Run "Refresh Planner Dropdowns" after adding new inventory.'
+    '1. Add entries in the Inventory sheet\n' +
+    '2. Use Program Planner to assign coffees each week\n' +
+    '3. Check Coverage Dashboard for red/yellow flags\n\n' +
+    'Every Monday: ☕ menu → Advance to Next Week'
   );
 }
 
@@ -71,7 +71,13 @@ function setupInventorySheet(ss) {
   if (!sheet) sheet = ss.insertSheet(SHEET_INV, 0);
   else { sheet.clear(); sheet.clearConditionalFormatRules(); }
 
-  // Column widths (1-indexed)
+  // Expand to 33 columns — new sheets only have 26 (A-Z) by default
+  const neededCols = 33;
+  if (sheet.getMaxColumns() < neededCols) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), neededCols - sheet.getMaxColumns());
+  }
+
+  // Column widths (1-indexed, A through AG)
   [[1,80],[2,100],[3,140],[4,130],[5,90],[6,75],[7,55],[8,80],
    [9,90],[10,80],[11,80],[12,160],
    [13,140],[14,140],[15,85],[16,85],[17,70],[18,95],
@@ -93,13 +99,13 @@ function setupInventorySheet(ss) {
   const hdr = sheet.getRange(1, 1, 1, headers.length);
   hdr.setValues([headers]).setBackground('#2C1810').setFontColor('#FFFFFF')
      .setFontWeight('bold').setFontSize(10);
-  sheet.getRange(1,13,1,12).setBackground('#4A2C17'); // brewing section darker
-  sheet.getRange(1,25,1,9).setBackground('#1A3A2A');  // retail section green
+  sheet.getRange(1,13,1,12).setBackground('#4A2C17');
+  sheet.getRange(1,25,1,9).setBackground('#1A3A2A');
 
   sheet.setFrozenRows(1);
   sheet.setFrozenColumns(3);
 
-  // Array formulas for all calculated columns — one formula each, spills down
+  // Array formulas — one per calculated column, spills down automatically
   [
     [2, 8,  '=ARRAYFORMULA(IF((F2:F<>"")*(G2:G<>""),F2:F*G2:G,""))'],
     [2, 11, '=ARRAYFORMULA(IF((J2:J<>"")*(G2:G<>""),J2:J*G2:G,""))'],
@@ -128,7 +134,7 @@ function setupInventorySheet(ss) {
   [10,11,27,28].forEach(c => sheet.getRange(2,c,1000,1).setNumberFormat('"$"#,##0.00'));
   [8,15,16,32].forEach(c => sheet.getRange(2,c,1000,1).setNumberFormat('0.0'));
 
-  // Hide helper column L (display name)
+  // Hide display name helper column L
   sheet.hideColumns(12);
 
   // Conditional formatting
@@ -164,22 +170,21 @@ function setupPlannerSheet(ss) {
   [PR.HOUSE_DROP,PR.FEAT_DROP,PR.BATCH_DROP,PR.POUR_DROP].forEach(r => sheet.setRowHeight(r, 36));
   [PR.HOUSE_LBS,PR.FEAT_BURN,PR.FEAT_LBS,PR.BATCH_LBS,PR.POUR_LBS].forEach(r => sheet.setRowHeight(r, 26));
 
-  // Header
+  // Header row background
   sheet.getRange(1,1,1,5).setBackground('#2C1810').setFontColor('#FFFFFF').setFontWeight('bold');
   sheet.getRange(1,1).setValue('Program');
-  // Week dates populated by refreshWeekDates()
 
-  // Row labels and colors [row, label, fontColor, bgColor, bold]
+  // Row labels and colors
   [
-    [PR.HOUSE_DROP,'House Espresso',         '#155724','#D4EDDA',true ],
-    [PR.HOUSE_LBS, '  lbs remaining',        '#4A7C59','#F0FAF3',false],
-    [PR.FEAT_DROP, 'Featured Espresso',      '#7D4A1F','#E8D5C4',true ],
-    [PR.FEAT_BURN, '  burn rate (lbs/wk)',   '#9B6940','#FBF0E7',false],
-    [PR.FEAT_LBS,  '  lbs remaining',        '#9B6940','#FBF0E7',false],
-    [PR.BATCH_DROP,'Batch Drip',             '#0C5460','#D1ECF1',true ],
-    [PR.BATCH_LBS, '  lbs remaining',        '#2D7A8A','#E8F6F8',false],
-    [PR.POUR_DROP, 'Pour Over',              '#4B2B7A','#E2D9F3',true ],
-    [PR.POUR_LBS,  '  lbs remaining',        '#6B4A9A','#EDE8F5',false],
+    [PR.HOUSE_DROP, 'House Espresso',       '#155724','#D4EDDA', true ],
+    [PR.HOUSE_LBS,  '  lbs remaining',      '#4A7C59','#F0FAF3', false],
+    [PR.FEAT_DROP,  'Featured Espresso',    '#7D4A1F','#E8D5C4', true ],
+    [PR.FEAT_BURN,  '  burn rate (lbs/wk)','#9B6940','#FBF0E7', false],
+    [PR.FEAT_LBS,   '  lbs remaining',      '#9B6940','#FBF0E7', false],
+    [PR.BATCH_DROP, 'Batch Drip',           '#0C5460','#D1ECF1', true ],
+    [PR.BATCH_LBS,  '  lbs remaining',      '#2D7A8A','#E8F6F8', false],
+    [PR.POUR_DROP,  'Pour Over',            '#4B2B7A','#E2D9F3', true ],
+    [PR.POUR_LBS,   '  lbs remaining',      '#6B4A9A','#EDE8F5', false],
   ].forEach(([row,label,fg,bg,bold]) => {
     sheet.getRange(row,1).setValue(label).setFontColor(fg).setBackground(bg)
          .setFontWeight(bold?'bold':'normal').setFontSize(bold?11:9);
@@ -200,12 +205,12 @@ function setupPlannerSheet(ss) {
   sheet.getRange(PR.FEAT_BURN,2,1,4).setNumberFormat('0.0')
        .setNote('Enter Featured Espresso burn rate in lbs/week (variable per coffee)');
 
-  // Burn rates note
+  // Burn rates note row
   sheet.getRange(PR.NOTE,1,1,5).merge()
     .setValue('Burn rates: House Espresso 13.6 lbs/wk  |  Batch Drip 3.4 lbs/wk  |  Pour Over 0.5 lbs/wk  |  Featured: enter manually in row 5')
     .setFontSize(8).setFontColor('#888888').setBackground('#F8F8F8');
 
-  // Conditional formatting: lbs cells turn yellow when low, red when 0
+  // Conditional formatting on lbs cells
   const lbsRanges = [PR.HOUSE_LBS,PR.FEAT_LBS,PR.BATCH_LBS,PR.POUR_LBS]
     .map(r => sheet.getRange(r,2,1,4));
   sheet.setConditionalFormatRules([
@@ -220,7 +225,7 @@ function setupPlannerSheet(ss) {
   Logger.log('✓ Planner sheet ready');
 }
 
-// Lbs at END of week — fixed burn rate
+// Lbs at END of week — fixed burn rate program
 function lbsEnd(dropCell, weekCell, burnRate, programName) {
   return `=IFERROR(IF(${dropCell}="","",LET(` +
     `r,MATCH(${dropCell},Inventory!$L:$L,0),` +
@@ -257,21 +262,21 @@ function setupDashboardSheet(ss) {
   sheet.setColumnWidth(1, 185);
   [2,3,4,5].forEach(c => sheet.setColumnWidth(c, 215));
 
-  // Header row — week dates mirror Planner
+  // Header — week dates mirror Planner
   sheet.getRange(1,1,1,5).setBackground('#2C1810').setFontColor('#FFFFFF').setFontWeight('bold');
   sheet.getRange(1,1).setValue('Program');
-  ['B','C','D','E'].forEach(col => {
-    sheet.getRange(`${col}1`).setFormula(`='Program Planner'!${col}1`).setNumberFormat('MMM D')
-         .setHorizontalAlignment('center').setFontWeight('bold').setFontColor('#FFFFFF');
-  });
+  ['B','C','D','E'].forEach(col =>
+    sheet.getRange(`${col}1`).setFormula(`='Program Planner'!${col}1`)
+         .setNumberFormat('MMM D').setHorizontalAlignment('center')
+         .setFontWeight('bold').setFontColor('#FFFFFF'));
 
-  // Program × week coverage cells
+  // Program rows
   const P = "'Program Planner'";
   [
     {row:2, name:'House Espresso',    dr:PR.HOUSE_DROP, lr:PR.HOUSE_LBS, br:13.6},
     {row:3, name:'Featured Espresso', dr:PR.FEAT_DROP,  lr:PR.FEAT_LBS,  br:null, brr:PR.FEAT_BURN},
-    {row:4, name:'Batch Drip',        dr:PR.BATCH_DROP, lr:PR.BATCH_LBS, br:3.4 },
-    {row:5, name:'Pour Over',         dr:PR.POUR_DROP,  lr:PR.POUR_LBS,  br:0.5 },
+    {row:4, name:'Batch Drip',        dr:PR.BATCH_DROP, lr:PR.BATCH_LBS, br:3.4},
+    {row:5, name:'Pour Over',         dr:PR.POUR_DROP,  lr:PR.POUR_LBS,  br:0.5},
   ].forEach(prog => {
     sheet.getRange(prog.row,1).setValue(prog.name).setFontWeight('bold');
     sheet.setRowHeight(prog.row, 65);
@@ -280,7 +285,9 @@ function setupDashboardSheet(ss) {
       const coffee = `${P}!${col}${prog.dr}`;
       const lbs    = `${P}!${col}${prog.lr}`;
       const wk     = `${P}!${col}${PR.HEADER}`;
-      const br     = prog.br ? prog.br : `IF(ISNUMBER(${P}!${col}${prog.brr}),${P}!${col}${prog.brr},2)`;
+      const br     = prog.br
+        ? prog.br
+        : `IF(ISNUMBER(${P}!${col}${prog.brr}),${P}!${col}${prog.brr},2)`;
 
       const status =
         `IF(${coffee}="","Out",IFERROR(LET(` +
@@ -301,23 +308,22 @@ function setupDashboardSheet(ss) {
   // Summary row
   sheet.setRowHeight(6, 80);
   sheet.getRange(6,1).setValue('Weekly Summary').setFontWeight('bold').setBackground('#F5F5F5');
-  ['B','C','D','E'].forEach(col => {
-    sheet.getRange(6, ['B','C','D','E'].indexOf(col)+2)
-      .setFormula(
-        `=LET(hl,IF(ISNUMBER(${P}!${col}${PR.HOUSE_LBS}),${P}!${col}${PR.HOUSE_LBS},0),` +
-        `fl,IF(ISNUMBER(${P}!${col}${PR.FEAT_LBS}),${P}!${col}${PR.FEAT_LBS},0),` +
-        `bl,IF(ISNUMBER(${P}!${col}${PR.BATCH_LBS}),${P}!${col}${PR.BATCH_LBS},0),` +
-        `pl,IF(ISNUMBER(${P}!${col}${PR.POUR_LBS}),${P}!${col}${PR.POUR_LBS},0),` +
-        `ho,AND(${P}!${col}${PR.HOUSE_DROP}<>"",hl>=13.6),` +
-        `fo,${P}!${col}${PR.FEAT_DROP}<>"",` +
-        `bo,AND(${P}!${col}${PR.BATCH_DROP}<>"",bl>=3.4),` +
-        `po,AND(${P}!${col}${PR.POUR_DROP}<>"",pl>=0.5),` +
-        `n,IF(ho,1,0)+IF(fo,1,0)+IF(bo,1,0)+IF(po,1,0),` +
-        `TEXT(n,"0")&"/4 programs covered"&` +
-        `IF(NOT(ho),CHAR(10)&"⚠ House Espresso","")&` +
-        `IF(NOT(fo),CHAR(10)&"⚠ Featured Espresso","")&` +
-        `IF(NOT(bo),CHAR(10)&"⚠ Batch Drip","")&` +
-        `IF(NOT(po),CHAR(10)&"⚠ Pour Over",""))`)
+  ['B','C','D','E'].forEach((col, wi) => {
+    sheet.getRange(6, wi+2).setFormula(
+      `=LET(hl,IF(ISNUMBER(${P}!${col}${PR.HOUSE_LBS}),${P}!${col}${PR.HOUSE_LBS},0),` +
+      `fl,IF(ISNUMBER(${P}!${col}${PR.FEAT_LBS}),${P}!${col}${PR.FEAT_LBS},0),` +
+      `bl,IF(ISNUMBER(${P}!${col}${PR.BATCH_LBS}),${P}!${col}${PR.BATCH_LBS},0),` +
+      `pl,IF(ISNUMBER(${P}!${col}${PR.POUR_LBS}),${P}!${col}${PR.POUR_LBS},0),` +
+      `ho,AND(${P}!${col}${PR.HOUSE_DROP}<>"",hl>=13.6),` +
+      `fo,${P}!${col}${PR.FEAT_DROP}<>"",` +
+      `bo,AND(${P}!${col}${PR.BATCH_DROP}<>"",bl>=3.4),` +
+      `po,AND(${P}!${col}${PR.POUR_DROP}<>"",pl>=0.5),` +
+      `n,IF(ho,1,0)+IF(fo,1,0)+IF(bo,1,0)+IF(po,1,0),` +
+      `TEXT(n,"0")&"/4 programs covered"&` +
+      `IF(NOT(ho),CHAR(10)&"⚠ House Espresso","")&` +
+      `IF(NOT(fo),CHAR(10)&"⚠ Featured Espresso","")&` +
+      `IF(NOT(bo),CHAR(10)&"⚠ Batch Drip","")&` +
+      `IF(NOT(po),CHAR(10)&"⚠ Pour Over",""))`)
       .setWrap(true).setBackground('#F5F5F5').setFontSize(9);
   });
 
@@ -331,10 +337,11 @@ function setupDashboardSheet(ss) {
     SpreadsheetApp.newConditionalFormatRule().whenTextContains('Nothing assigned').setBackground('#F5C6CB').setFontColor('#721C24').setRanges(cov).build(),
   ];
 
-  // Retail freshness section (starts row 8)
+  // Retail freshness section
   sheet.getRange(8,1,1,5).merge().setValue('RETAIL FRESHNESS')
     .setBackground('#1A3A2A').setFontColor('#FFFFFF').setFontWeight('bold').setFontSize(11);
-  sheet.getRange(9,1,1,5).setValues([['Coffee','Bags On Hand','Wks Supply','Days to Cutoff','Freshness Status']])
+  sheet.getRange(9,1,1,5)
+    .setValues([['Coffee','Bags On Hand','Wks Supply','Days to Cutoff','Freshness Status']])
     .setBackground('#2A5A3A').setFontColor('#FFFFFF').setFontWeight('bold');
   sheet.getRange(10,1).setFormula(
     '=IFERROR(SORT(FILTER(' +
@@ -343,30 +350,62 @@ function setupDashboardSheet(ss) {
     '{"No retail inventory yet","","","",""})');
 
   const fresh = [sheet.getRange('E10:E60')];
-  const freshRules = [
+  sheet.setConditionalFormatRules([...covRules,
     SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('OK').setBackground('#D4EDDA').setFontColor('#155724').setRanges(fresh).build(),
     SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Watch').setBackground('#FFF3CD').setFontColor('#856404').setRanges(fresh).build(),
     SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Urgent').setBackground('#FFE8CC').setFontColor('#7D3A00').setRanges(fresh).build(),
     SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Expired').setBackground('#F8D7DA').setFontColor('#721C24').setRanges(fresh).build(),
-  ];
+  ]);
 
-  sheet.setConditionalFormatRules([...covRules, ...freshRules]);
   sheet.setFrozenRows(1);
   sheet.setFrozenColumns(1);
   Logger.log('✓ Dashboard sheet ready');
 }
 
 // ================================================================
-// REFRESH FUNCTIONS — run these weekly from the menu
+// WEEKLY WORKFLOW FUNCTIONS
 // ================================================================
 
+// Run every Monday — shifts selections left and opens up new Week 4
+function advanceWeek() {
+  const ss   = SpreadsheetApp.getActiveSpreadsheet();
+  const plan = ss.getSheetByName(SHEET_PLAN);
+  if (!plan) {
+    SpreadsheetApp.getUi().alert('Planner sheet not found. Run Full Setup first.');
+    return;
+  }
+
+  // Rows that hold operator-entered data (selections + featured burn rate)
+  const dataRows = [PR.HOUSE_DROP, PR.FEAT_DROP, PR.FEAT_BURN, PR.BATCH_DROP, PR.POUR_DROP];
+
+  // Shift Week 2→1, Week 3→2, Week 4→3, clear Week 4
+  dataRows.forEach(row => {
+    const vals = plan.getRange(row, 2, 1, 4).getValues()[0]; // [B, C, D, E]
+    plan.getRange(row, 2).setValue(vals[1]); // C → B
+    plan.getRange(row, 3).setValue(vals[2]); // D → C
+    plan.getRange(row, 4).setValue(vals[3]); // E → D
+    plan.getRange(row, 5).clearContent();    // E = blank new week
+  });
+
+  // Advance dates and refresh dropdowns
+  refreshWeekDates();
+  refreshDropdowns();
+
+  SpreadsheetApp.getUi().alert(
+    '✓ Advanced to next week!\n\n' +
+    'Your existing selections have shifted forward.\n' +
+    'Fill in Week 4 (rightmost column) to complete the plan.'
+  );
+}
+
+// Updates week date headers in the Planner (called by advanceWeek and setupAll)
 function refreshWeekDates() {
   const ss   = SpreadsheetApp.getActiveSpreadsheet();
   const plan = ss.getSheetByName(SHEET_PLAN);
-  if (!plan) { Logger.log('Planner sheet not found — run setupAll() first'); return; }
+  if (!plan) return;
 
   const today  = new Date();
-  const day    = today.getDay(); // 0=Sun, 1=Mon...
+  const day    = today.getDay();
   const monday = new Date(today);
   monday.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
   monday.setHours(0, 0, 0, 0);
@@ -375,49 +414,45 @@ function refreshWeekDates() {
     const d = new Date(monday);
     d.setDate(monday.getDate() + offset * 7);
     const end = new Date(d);
-    end.setDate(d.getDate() + 5); // Mon → Sat
+    end.setDate(d.getDate() + 5);
 
-    const cell = plan.getRange(1, offset + 2); // B=2, C=3, D=4, E=5
+    const cell = plan.getRange(1, offset + 2);
     cell.setValue(d)
         .setNumberFormat('MMM D')
         .setHorizontalAlignment('center')
         .setFontWeight('bold')
         .setFontColor('#FFFFFF')
         .setNote(
-          d.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'}) +
+          d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}) +
           ' – ' +
-          end.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'})
+          end.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})
         );
   });
   Logger.log('✓ Week dates updated');
 }
 
+// Refreshes planner dropdown options from current inventory state
 function refreshDropdowns() {
   const ss   = SpreadsheetApp.getActiveSpreadsheet();
   const plan = ss.getSheetByName(SHEET_PLAN);
   const inv  = ss.getSheetByName(SHEET_INV);
-  if (!plan || !inv) { Logger.log('Sheets not found — run setupAll() first'); return; }
+  if (!plan || !inv) return;
 
   const lastRow = inv.getLastRow();
   if (lastRow < 2) { Logger.log('No inventory data yet'); return; }
 
-  // Read all inventory rows (computed values, so formulas are already resolved)
   const invData = inv.getRange(2, 1, lastRow - 1, 33).getValues();
-
-  // Read week start dates from Planner header row
-  const weeks = [2,3,4,5].map(col => {
+  const weeks   = [2,3,4,5].map(col => {
     const v = plan.getRange(1, col).getValue();
     return (v instanceof Date) ? v : null;
   });
 
-  const programs = [
-    { name:'House Espresso',    burnRate:13.6, dropRow:PR.HOUSE_DROP },
-    { name:'Featured Espresso', burnRate:2,    dropRow:PR.FEAT_DROP  }, // 2 lbs/wk as availability estimate
-    { name:'Batch Drip',        burnRate:3.4,  dropRow:PR.BATCH_DROP },
-    { name:'Pour Over',         burnRate:0.5,  dropRow:PR.POUR_DROP  },
-  ];
-
-  programs.forEach(prog => {
+  [
+    {name:'House Espresso',    burnRate:13.6, dropRow:PR.HOUSE_DROP},
+    {name:'Featured Espresso', burnRate:2,    dropRow:PR.FEAT_DROP },
+    {name:'Batch Drip',        burnRate:3.4,  dropRow:PR.BATCH_DROP},
+    {name:'Pour Over',         burnRate:0.5,  dropRow:PR.POUR_DROP },
+  ].forEach(prog => {
     weeks.forEach((weekDate, wi) => {
       if (!weekDate) return;
       const available = getAvailableCoffees(invData, prog.name, weekDate, prog.burnRate);
@@ -427,41 +462,35 @@ function refreshDropdowns() {
           .requireValueInList(list, true)
           .setAllowInvalid(true)
           .setHelpText(available.length > 0
-            ? `${available.length} option(s) available for ${prog.name}`
+            ? `${available.length} option(s) ready for ${prog.name}`
             : `No coffees ready for ${prog.name} this week — check Inventory`)
           .build()
       );
     });
   });
-  Logger.log('✓ Planner dropdowns refreshed');
+  Logger.log('✓ Dropdowns refreshed');
 }
 
-// Returns display names (col L) of brewing inventory items available
-// for a given program and week start date.
+// Returns display names of brewing inventory available for a program/week
 function getAvailableCoffees(invData, programName, weekDate, burnRate) {
   const msPerWeek = 7 * 24 * 60 * 60 * 1000;
   const result = [];
 
   for (const row of invData) {
     if (row[IC.TYPE] !== 'brewing') continue;
-
     const displayName = row[IC.DISPLAY_NAME];
     if (!displayName) continue;
 
-    // Program must match primary or secondary assignment
     const primary   = row[IC.PRIMARY];
     const secondary = row[IC.SECONDARY];
     if (primary !== programName && secondary !== programName) continue;
 
-    // Skip finished entries
     const actualEnd = row[IC.ACTUAL_END];
     if (actualEnd instanceof Date || (typeof actualEnd === 'string' && actualEnd !== '')) continue;
 
-    // Must be brew-ready by week start
     const brewReady = row[IC.BREW_READY];
     if (brewReady instanceof Date && brewReady > weekDate) continue;
 
-    // Must have lbs remaining
     const isPrimary = primary === programName;
     const alloc     = isPrimary ? row[IC.ALLOC_PRI] : row[IC.ALLOC_SEC];
     if (!alloc || alloc <= 0) continue;
@@ -469,8 +498,8 @@ function getAvailableCoffees(invData, programName, weekDate, burnRate) {
     const activated = row[IC.ACTIVATED];
     let lbsLeft = alloc;
     if (activated instanceof Date && activated <= weekDate) {
-      const weeks = Math.floor((weekDate - activated) / msPerWeek);
-      lbsLeft = Math.max(0, alloc - burnRate * weeks);
+      const wks = Math.floor((weekDate - activated) / msPerWeek);
+      lbsLeft = Math.max(0, alloc - burnRate * wks);
     }
 
     if (lbsLeft > 0) result.push(displayName);

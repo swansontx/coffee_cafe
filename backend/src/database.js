@@ -8,76 +8,69 @@ const __dirname = path.dirname(__filename);
 const dbPath = path.join(__dirname, '../database/coffee_tracker.db');
 const db = new Database(dbPath);
 
-// Enable foreign keys
 db.pragma('foreign_keys = ON');
 
-// Initialize database schema
 export function initializeDatabase() {
-  // Coffees table
   db.exec(`
-    CREATE TABLE IF NOT EXISTS coffees (
+    CREATE TABLE IF NOT EXISTS inventory (
       id TEXT PRIMARY KEY,
+      type TEXT NOT NULL CHECK(type IN ('brewing', 'retail')),
+
+      -- Identity
       roaster TEXT NOT NULL,
-      name TEXT NOT NULL,
-      origin TEXT,
-      region TEXT,
-      process TEXT,
-      roast_date TEXT NOT NULL,
-      roast_level TEXT,
-      price_per_kg REAL,
-      notes TEXT,
-      state TEXT DEFAULT 'active' CHECK(state IN ('active', 'archive', 'incoming')),
+      coffee_name TEXT NOT NULL,
+      origin_process TEXT,
+      roast_date TEXT,
+      package_size REAL,
+      package_count INTEGER DEFAULT 1,
+
+      -- Order info
+      order_date TEXT,
+      cost_per_package REAL,
+
+      -- Program assignment (brewing only)
+      primary_program TEXT CHECK(primary_program IN ('house_espresso', 'featured_espresso', 'pour_over', 'batch_drip', NULL)),
+      secondary_program TEXT CHECK(secondary_program IN ('house_espresso', 'featured_espresso', 'pour_over', 'batch_drip', NULL)),
+      allocated_lbs_primary REAL,
+      allocated_lbs_secondary REAL,
+
+      -- Rest window (brewing only)
+      min_rest_days INTEGER,
+
+      -- Status tracking (brewing only)
+      arrival_date TEXT,
+      in_transit INTEGER DEFAULT 0,
+      activated_date TEXT,
+      actual_end_date TEXT,
+
+      -- Retail fields
+      bags_on_hand INTEGER,
+      weekly_sell_rate REAL,
+      retail_price_per_bag REAL,
+      freshness_window_days INTEGER DEFAULT 56,
+
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
-  // Brew sessions table
   db.exec(`
-    CREATE TABLE IF NOT EXISTS brew_sessions (
+    CREATE TABLE IF NOT EXISTS program_planner (
       id TEXT PRIMARY KEY,
-      coffee_id TEXT NOT NULL,
-      method TEXT NOT NULL CHECK(method IN ('espresso', 'batch', 'pourover')),
-      timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-
-      -- Common parameters
-      dose REAL NOT NULL,
-      yield REAL,
-      brew_time REAL,
-      tds REAL NOT NULL,
-      grind_setting REAL,
-      water_temp REAL,
-      rating INTEGER CHECK(rating BETWEEN 1 AND 5),
-      notes TEXT,
-
-      -- Espresso specific
-      pre_infusion_time REAL,
-      pre_infusion_pressure REAL,
-      full_pressure REAL,
-
-      -- Batch brew specific
-      water_volume REAL,
-
-      -- Pourover specific
-      bloom_time REAL,
-      bloom_water REAL,
-
-      -- Calculated fields
-      extraction_yield REAL,
-      brew_ratio TEXT,
-
+      week_start_date TEXT NOT NULL,
+      program TEXT NOT NULL CHECK(program IN ('house_espresso', 'featured_espresso', 'pour_over', 'batch_drip')),
+      inventory_id TEXT REFERENCES inventory(id) ON DELETE SET NULL,
+      featured_burn_rate REAL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-
-      FOREIGN KEY (coffee_id) REFERENCES coffees(id) ON DELETE CASCADE
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(week_start_date, program)
     )
   `);
 
-  // Create indexes for performance
   db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_brew_sessions_coffee_id ON brew_sessions(coffee_id);
-    CREATE INDEX IF NOT EXISTS idx_brew_sessions_method ON brew_sessions(method);
-    CREATE INDEX IF NOT EXISTS idx_brew_sessions_timestamp ON brew_sessions(timestamp);
-    CREATE INDEX IF NOT EXISTS idx_coffees_state ON coffees(state);
+    CREATE INDEX IF NOT EXISTS idx_inventory_type ON inventory(type);
+    CREATE INDEX IF NOT EXISTS idx_inventory_primary_program ON inventory(primary_program);
+    CREATE INDEX IF NOT EXISTS idx_planner_week ON program_planner(week_start_date);
   `);
 
   console.log('Database initialized successfully');

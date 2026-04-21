@@ -1,152 +1,79 @@
-const API_BASE_URL = 'http://localhost:3000/api';
+import type { InventoryItem, BrewingProgram, PlannerGrid } from '../types';
+
+const API_BASE = 'http://localhost:3000/api';
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  status: number;
+  constructor(status: number, message: string) {
     super(message);
+    this.status = status;
     this.name = 'ApiError';
   }
 }
 
-async function handleResponse(response: Response) {
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new ApiError(response.status, error.error || error.message);
+async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Request failed' }));
+    throw new ApiError(res.status, err.error || err.message || 'Request failed');
   }
-
-  return response.json();
+  return res.json();
 }
 
-// Coffee API
-export const coffeeApi = {
-  async getAll(state?: string) {
-    const url = state
-      ? `${API_BASE_URL}/coffees?state=${state}`
-      : `${API_BASE_URL}/coffees`;
-    const response = await fetch(url);
-    return handleResponse(response);
+function json(method: string, body: unknown) {
+  return {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  };
+}
+
+export const inventoryApi = {
+  getAll(filters?: { type?: string; program?: string }): Promise<InventoryItem[]> {
+    const params = new URLSearchParams();
+    if (filters?.type) params.set('type', filters.type);
+    if (filters?.program) params.set('program', filters.program);
+    const qs = params.toString() ? `?${params}` : '';
+    return request(`${API_BASE}/inventory${qs}`);
   },
 
-  async getById(id: string) {
-    const response = await fetch(`${API_BASE_URL}/coffees/${id}`);
-    return handleResponse(response);
+  getById(id: string): Promise<InventoryItem> {
+    return request(`${API_BASE}/inventory/${id}`);
   },
 
-  async create(data: any) {
-    const response = await fetch(`${API_BASE_URL}/coffees`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-    return handleResponse(response);
+  getAvailable(program: BrewingProgram, weekStart: string, featuredBurnRate?: number): Promise<InventoryItem[]> {
+    const params = new URLSearchParams({ program, week_start: weekStart });
+    if (featuredBurnRate != null) params.set('featured_burn_rate', String(featuredBurnRate));
+    return request(`${API_BASE}/inventory/available?${params}`);
   },
 
-  async update(id: string, data: any) {
-    const response = await fetch(`${API_BASE_URL}/coffees/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-    return handleResponse(response);
+  create(data: Partial<InventoryItem>): Promise<InventoryItem> {
+    return request(`${API_BASE}/inventory`, json('POST', data));
   },
 
-  async archive(id: string) {
-    const response = await fetch(`${API_BASE_URL}/coffees/${id}`, {
-      method: 'DELETE'
-    });
-    return handleResponse(response);
+  update(id: string, data: Partial<InventoryItem>): Promise<InventoryItem> {
+    return request(`${API_BASE}/inventory/${id}`, json('PUT', data));
   },
 
-  async getRoasters() {
-    const response = await fetch(`${API_BASE_URL}/coffees/roasters`);
-    return handleResponse(response);
+  delete(id: string): Promise<void> {
+    return request(`${API_BASE}/inventory/${id}`, { method: 'DELETE' });
   }
 };
 
-// Brew API
-export const brewApi = {
-  async getAll(filters?: {
-    coffee_id?: string;
-    method?: string;
-    start_date?: string;
-    end_date?: string;
-    limit?: number;
-  }) {
-    const params = new URLSearchParams();
-    if (filters) {
-      Object.entries(filters).forEach(([key, value]) => {
-        if (value !== undefined) {
-          params.append(key, value.toString());
-        }
-      });
-    }
-
-    const url = params.toString()
-      ? `${API_BASE_URL}/brews?${params}`
-      : `${API_BASE_URL}/brews`;
-
-    const response = await fetch(url);
-    return handleResponse(response);
+export const plannerApi = {
+  getGrid(weekStartDates: string[]): Promise<PlannerGrid> {
+    const params = new URLSearchParams({ weeks: weekStartDates.join(',') });
+    return request(`${API_BASE}/planner?${params}`);
   },
 
-  async getById(id: string) {
-    const response = await fetch(`${API_BASE_URL}/brews/${id}`);
-    return handleResponse(response);
+  setEntry(weekStart: string, program: BrewingProgram, inventoryId: string | null, featuredBurnRate?: number | null) {
+    return request(`${API_BASE}/planner/${weekStart}/${program}`, json('PUT', {
+      inventory_id: inventoryId,
+      featured_burn_rate: featuredBurnRate ?? null
+    }));
   },
 
-  async create(data: any) {
-    const response = await fetch(`${API_BASE_URL}/brews`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-    return handleResponse(response);
-  },
-
-  async update(id: string, data: any) {
-    const response = await fetch(`${API_BASE_URL}/brews/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-    return handleResponse(response);
-  },
-
-  async delete(id: string) {
-    const response = await fetch(`${API_BASE_URL}/brews/${id}`, {
-      method: 'DELETE'
-    });
-    return handleResponse(response);
-  },
-
-  async getLastForCoffee(coffeeId: string, method?: string) {
-    const url = method
-      ? `${API_BASE_URL}/brews/coffee/${coffeeId}/last?method=${method}`
-      : `${API_BASE_URL}/brews/coffee/${coffeeId}/last`;
-
-    const response = await fetch(url);
-    return handleResponse(response);
-  },
-
-  async getAnalytics(filters?: {
-    method?: string;
-    coffee_id?: string;
-    start_date?: string;
-    end_date?: string;
-  }) {
-    const params = new URLSearchParams();
-    if (filters) {
-      Object.entries(filters).forEach(([key, value]) => {
-        if (value !== undefined) {
-          params.append(key, value);
-        }
-      });
-    }
-
-    const url = params.toString()
-      ? `${API_BASE_URL}/brews/analytics?${params}`
-      : `${API_BASE_URL}/brews/analytics`;
-
-    const response = await fetch(url);
-    return handleResponse(response);
+  clearEntry(weekStart: string, program: BrewingProgram) {
+    return request(`${API_BASE}/planner/${weekStart}/${program}`, { method: 'DELETE' });
   }
 };

@@ -40,7 +40,7 @@ const PR = {
 
 function onOpen() {
   SpreadsheetApp.getActiveSpreadsheet().addMenu('☕ Sometimes Coffee', [
-    { name: 'Advance to Next Week',      functionName: 'advanceWeek'       },
+    { name: 'Advance / Catch Up to Today', functionName: 'advanceWeek'       },
     { name: 'Refresh Planner Dropdowns', functionName: 'refreshDropdowns'  },
     null,
     { name: 'Full Setup (first run)',    functionName: 'setupAll'          },
@@ -375,7 +375,8 @@ function setupDashboardSheet(ss) {
 // WEEKLY WORKFLOW FUNCTIONS
 // ================================================================
 
-// Run every Monday — shifts selections left and opens up new Week 4
+// Auto-detects how many weeks have passed and catches up in one shot.
+// Safe to run whether you're 1 week behind or 3 — past weeks are cleared.
 function advanceWeek() {
   const ss   = SpreadsheetApp.getActiveSpreadsheet();
   const plan = ss.getSheetByName(SHEET_PLAN);
@@ -384,26 +385,51 @@ function advanceWeek() {
     return;
   }
 
+  const colBVal = plan.getRange(1, 2).getValue();
+  if (!(colBVal instanceof Date)) {
+    SpreadsheetApp.getUi().alert('No week date found in planner header. Run Full Setup first.');
+    return;
+  }
+
+  // Current week's Wednesday
+  const today   = new Date();
+  const day     = today.getDay();
+  const monday  = new Date(today);
+  monday.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
+  monday.setHours(0, 0, 0, 0);
+  const thisWed = new Date(monday);
+  thisWed.setDate(monday.getDate() + 2);
+
+  const msPerWeek  = 7 * 24 * 60 * 60 * 1000;
+  const weeksOld   = Math.round((thisWed - colBVal) / msPerWeek);
+
+  if (weeksOld <= 0) {
+    SpreadsheetApp.getUi().alert('Planner is already current — nothing to advance.');
+    return;
+  }
+
   // Rows that hold operator-entered data (selections + featured burn rate)
   const dataRows = [PR.HOUSE_DROP, PR.FEAT_DROP, PR.FEAT_BURN, PR.BATCH_DROP, PR.POUR_DROP];
 
-  // Shift Week 2→1, Week 3→2, Week 4→3, clear Week 4
-  dataRows.forEach(row => {
-    const vals = plan.getRange(row, 2, 1, 4).getValues()[0]; // [B, C, D, E]
-    plan.getRange(row, 2).setValue(vals[1]); // C → B
-    plan.getRange(row, 3).setValue(vals[2]); // D → C
-    plan.getRange(row, 4).setValue(vals[3]); // E → D
-    plan.getRange(row, 5).clearContent();    // E = blank new week
-  });
+  // Shift left once per elapsed week; values that fall off the left are gone
+  for (let w = 0; w < weeksOld; w++) {
+    dataRows.forEach(row => {
+      const vals = plan.getRange(row, 2, 1, 4).getValues()[0]; // [B, C, D, E]
+      plan.getRange(row, 2).setValue(vals[1]); // C → B
+      plan.getRange(row, 3).setValue(vals[2]); // D → C
+      plan.getRange(row, 4).setValue(vals[3]); // E → D
+      plan.getRange(row, 5).clearContent();    // clear rightmost (new week)
+    });
+  }
 
-  // Advance dates and refresh dropdowns
   refreshWeekDates();
   refreshDropdowns();
 
+  const wkLabel = weeksOld === 1 ? '1 week' : `${weeksOld} weeks`;
   SpreadsheetApp.getUi().alert(
-    '✓ Advanced to next week!\n\n' +
-    'Your existing selections have shifted forward.\n' +
-    'Fill in Week 4 (rightmost column) to complete the plan.'
+    `✓ Advanced ${wkLabel} — planner is now current.\n\n` +
+    'Past week selections have been cleared.\n' +
+    'Fill in any empty columns to complete the plan.'
   );
 }
 

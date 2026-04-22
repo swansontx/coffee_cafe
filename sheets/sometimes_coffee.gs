@@ -36,7 +36,10 @@ const PR = {
   FEAT_DROP:5,  FEAT_BURN:6, FEAT_LBS:7,
   BATCH_DROP:8, BATCH_LBS:9,
   POUR_DROP:10, POUR_LBS:11,
-  NOTE:13
+  NOTE:13,
+  // Hidden status rows — formula lookups from Inventory; used by CF rules
+  // (Sheets CF cannot reference a different sheet, so we cache status here)
+  HOUSE_ST:14, FEAT_ST:15, BATCH_ST:16, POUR_ST:17
 };
 
 // 1-indexed column for week w (0–3) and day d (0–4, Wed–Sun)
@@ -265,12 +268,35 @@ function setupPlannerSheet(ss) {
     .setValue('Fixed burn rates: House 13.6  |  Batch 3.4  |  Pour Over 0.5  (lbs/wk)  |  Featured: enter in each Wed cell')
     .setFontSize(8).setFontColor('#888888').setBackground('#F8F8F8');
 
-  // Conditional formatting — dropdown rows: color by coffee's readiness status in Inventory
-  // Formula uses relative ref (B{row}) so it adjusts for each cell across the 20-day range
+  // Hidden status lookup rows (rows 14–17) — cache Inventory status per day column.
+  // Sheets CF rules cannot reference a different sheet, so we store the lookup
+  // result here and the CF rules reference these same-sheet rows instead.
+  [
+    [PR.HOUSE_ST, PR.HOUSE_DROP],
+    [PR.FEAT_ST,  PR.FEAT_DROP ],
+    [PR.BATCH_ST, PR.BATCH_DROP],
+    [PR.POUR_ST,  PR.POUR_DROP ],
+  ].forEach(([stRow, dropRow]) => {
+    sheet.getRange(stRow, 1).setValue(`_st_${dropRow}`); // marker for debugging
+    for (let col = 2; col <= 21; col++) {
+      const cl = colLetter(col);
+      sheet.getRange(stRow, col).setFormula(
+        `=IFERROR(INDEX(Inventory!$X:$X,MATCH(${cl}${dropRow},Inventory!$L:$L,0)),"")`);
+    }
+  });
+  sheet.hideRows(PR.HOUSE_ST, 4); // hide all 4 status rows
+
+  // Conditional formatting — dropdown rows: color by coffee readiness status.
+  // References the hidden same-sheet status rows (cross-sheet refs not allowed in CF).
+  // B{stRow} is a relative column ref — shifts C, D… as CF evaluates each cell.
   const dropRules = [];
-  [PR.HOUSE_DROP, PR.FEAT_DROP, PR.BATCH_DROP, PR.POUR_DROP].forEach(row => {
-    const range = [sheet.getRange(row, 2, 1, 20)];
-    const ref   = `B${row}`;
+  [
+    [PR.HOUSE_DROP, PR.HOUSE_ST],
+    [PR.FEAT_DROP,  PR.FEAT_ST ],
+    [PR.BATCH_DROP, PR.BATCH_ST],
+    [PR.POUR_DROP,  PR.POUR_ST ],
+  ].forEach(([dropRow, stRow]) => {
+    const range = [sheet.getRange(dropRow, 2, 1, 20)];
     [
       ['Active',     '#D4EDDA', '#155724'],
       ['Ready',      '#CCF5F1', '#0C5460'],
@@ -280,8 +306,7 @@ function setupPlannerSheet(ss) {
     ].forEach(([status, bg, fg]) => {
       dropRules.push(
         SpreadsheetApp.newConditionalFormatRule()
-          .whenFormulaSatisfied(
-            `=IFERROR(INDEX(Inventory!$X:$X,MATCH(${ref},Inventory!$L:$L,0))="${status}",FALSE)`)
+          .whenFormulaSatisfied(`=B${stRow}="${status}"`)
           .setBackground(bg).setFontColor(fg).setRanges(range).build()
       );
     });

@@ -245,10 +245,20 @@ function setupPlannerSheet(ss) {
   [PR.HOUSE_LBS,PR.FEAT_LBS,PR.BATCH_LBS,PR.POUR_LBS].forEach(r =>
     sheet.getRange(r,2,1,20).setNumberFormat('0.0 "lbs"'));
   sheet.getRange(PR.FEAT_BURN,2,1,20).setNumberFormat('0.0');
-  // FEAT_BURN: user fills in the Wed cell of each week; other days inherit from Wed
+
+  // Propagate Featured burn rate from Wednesday to Thu–Sun within each week.
+  // This lets the per-day yellow CF threshold (B6) work across all 5 columns.
+  for (let w = 0; w < 4; w++) {
+    const wedRef = `${colLetter(planCol(w, 0))}${PR.FEAT_BURN}`;
+    for (let d = 1; d < 5; d++) {
+      sheet.getRange(PR.FEAT_BURN, planCol(w, d))
+        .setFormula(`=IF(${wedRef}<>"",${wedRef},"")`);
+    }
+  }
+
   sheet.getRange(PR.FEAT_BURN,1).setNote(
     'Enter Featured Espresso burn rate in lbs/week.\n' +
-    'Fill the Wednesday cell of each week — Thu–Sun auto-reference it.');
+    'Fill the Wednesday cell of each week — Thu–Sun auto-copy it.');
 
   // Note row
   sheet.getRange(PR.NOTE,1,1,21).merge()
@@ -277,15 +287,33 @@ function setupPlannerSheet(ss) {
     });
   });
 
-  // Conditional formatting — lbs rows: warn when running low or depleted
-  const lbsRanges = [PR.HOUSE_LBS, PR.FEAT_LBS, PR.BATCH_LBS, PR.POUR_LBS]
+  // Conditional formatting — lbs rows
+  // Red: depleted (≤ 0). Yellow: < 2 days of burn remaining, per program.
+  // Each program gets its own formula rule so the threshold matches its burn rate.
+  // Relative refs (e.g. B4, B6) shift column-by-column across the 20-day range.
+  const allLbsRanges = [PR.HOUSE_LBS, PR.FEAT_LBS, PR.BATCH_LBS, PR.POUR_LBS]
     .map(r => sheet.getRange(r, 2, 1, 20));
+  const lbsLowRules = [
+    // House: 2 days = 2 × (13.6/7) ≈ 3.9 lbs
+    [PR.HOUSE_LBS, `=AND(B${PR.HOUSE_LBS}>0,B${PR.HOUSE_LBS}<(13.6/7)*2)`],
+    // Featured: burn rate entered per-week in FEAT_BURN row; Thu–Sun copy Wed value
+    [PR.FEAT_LBS,  `=AND(B${PR.FEAT_LBS}>0,B${PR.FEAT_LBS}<(B${PR.FEAT_BURN}/7)*2)`],
+    // Batch: 2 days = 2 × (3.4/7) ≈ 1.0 lbs
+    [PR.BATCH_LBS, `=AND(B${PR.BATCH_LBS}>0,B${PR.BATCH_LBS}<(3.4/7)*2)`],
+    // Pour Over: 2 days = 2 × (0.5/7) ≈ 0.14 lbs
+    [PR.POUR_LBS,  `=AND(B${PR.POUR_LBS}>0,B${PR.POUR_LBS}<(0.5/7)*2)`],
+  ].map(([row, formula]) =>
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(formula)
+      .setBackground('#FFF3CD').setFontColor('#856404')
+      .setRanges([sheet.getRange(row, 2, 1, 20)]).build()
+  );
+
   sheet.setConditionalFormatRules([
     ...dropRules,
     SpreadsheetApp.newConditionalFormatRule().whenNumberLessThanOrEqualTo(0)
-      .setBackground('#F8D7DA').setFontColor('#721C24').setRanges(lbsRanges).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenNumberBetween(0.01, 5)
-      .setBackground('#FFF3CD').setFontColor('#856404').setRanges(lbsRanges).build(),
+      .setBackground('#F8D7DA').setFontColor('#721C24').setRanges(allLbsRanges).build(),
+    ...lbsLowRules,
   ]);
 
   sheet.setFrozenRows(2);

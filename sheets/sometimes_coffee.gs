@@ -11,9 +11,9 @@
 // ================================================================
 
 const SHEET_INV    = 'Inventory';
-const SHEET_PLAN   = 'Program Planner';
+const SHEET_PLAN   = 'Daily Planner';      // 20-day selection grid
 const SHEET_DASH   = 'Coverage Dashboard';
-const SHEET_STATUS = 'Current Status';
+const SHEET_STATUS = 'Program Planner';    // inventory summary by category
 
 // Inventory column indices — 0-based for array/getValues() access
 const IC = {
@@ -29,40 +29,46 @@ const IC = {
 };
 
 // Planner sheet row numbers (1-indexed)
+// Row 1 = merged week group header, Row 2 = individual day headers
 const PR = {
-  HEADER:1,
-  HOUSE_DROP:2, HOUSE_LBS:3,
-  FEAT_DROP:4,  FEAT_BURN:5, FEAT_LBS:6,
-  BATCH_DROP:7, BATCH_LBS:8,
-  POUR_DROP:9,  POUR_LBS:10,
-  NOTE:12
+  WEEK_HDR:1, DAY_HDR:2,
+  HOUSE_DROP:3, HOUSE_LBS:4,
+  FEAT_DROP:5,  FEAT_BURN:6, FEAT_LBS:7,
+  BATCH_DROP:8, BATCH_LBS:9,
+  POUR_DROP:10, POUR_LBS:11,
+  NOTE:13
 };
+
+// 1-indexed column for week w (0–3) and day d (0–4, Wed–Sun)
+function planCol(w, d) { return 2 + w * 5 + d; }
+// Column letter for 1-indexed column (works A–Z)
+function colLetter(n) { return String.fromCharCode(64 + n); }
 
 function onOpen() {
   SpreadsheetApp.getActiveSpreadsheet().addMenu('☕ Sometimes Coffee', [
-    { name: 'Advance / Catch Up to Today', functionName: 'advanceWeek'       },
-    { name: 'Refresh Planner Dropdowns', functionName: 'refreshDropdowns'  },
+    { name: 'Advance / Catch Up to Today',   functionName: 'advanceWeek'        },
+    { name: 'Refresh Daily Planner Dropdowns', functionName: 'refreshDropdowns' },
     null,
-    { name: 'Full Setup (first run)',    functionName: 'setupAll'          },
-    { name: 'Rebuild Status Sheet',      functionName: 'rebuildStatusSheet'}
+    { name: 'Full Setup (first run)',         functionName: 'setupAll'           },
+    { name: 'Rebuild Program Planner Sheet',  functionName: 'rebuildStatusSheet' }
   ]);
 }
 
 function setupAll() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   setupInventorySheet(ss);
+  setupStatusSheet(ss);
   setupPlannerSheet(ss);
   setupDashboardSheet(ss);
-  setupStatusSheet(ss);
   refreshWeekDates();
   refreshDropdowns();
   SpreadsheetApp.getUi().alert(
     '✓ Sometimes Coffee is ready!\n\n' +
-    '1. Add entries in the Inventory sheet\n' +
-    '2. Use Program Planner to assign coffees each week\n' +
-    '3. Check Coverage Dashboard for red/yellow flags\n' +
-    '4. Check Current Status for live counts and lbs\n\n' +
-    'Every Monday: ☕ menu → Advance to Next Week'
+    '1. Inventory — add all your coffees here\n' +
+    '2. Program Planner — live counts/lbs by category\n' +
+    '3. Daily Planner — assign coffees day-by-day (20 working days)\n' +
+    '4. Coverage Dashboard — weekly coverage check\n\n' +
+    'Every Monday: ☕ menu → Advance / Catch Up to Today'
   );
 }
 
@@ -133,6 +139,12 @@ function setupInventorySheet(ss) {
   const programs = ['House Espresso','Featured Espresso','Batch Drip','Pour Over'];
   sheet.getRange(2,1,1000,1).setDataValidation(
     SpreadsheetApp.newDataValidation().requireValueInList(['brewing','retail'],true).setAllowInvalid(false).build());
+  // Pkg Size col F — brewing uses lbs, retail uses oz
+  sheet.getRange(2,6,1000,1).setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList(['8 oz','10 oz','1 lb','2 lb','5 lb'],true).setAllowInvalid(true).build());
+  // Count col G — 1-8 bags/bags (can still type higher number if needed)
+  sheet.getRange(2,7,1000,1).setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList(['1','2','3','4','5','6','7','8'],true).setAllowInvalid(true).build());
   sheet.getRange(2,13,1000,2).setDataValidation(
     SpreadsheetApp.newDataValidation().requireValueInList(programs,true).setAllowInvalid(false).build());
   sheet.getRange(2,20,1000,1).setDataValidation(
@@ -170,18 +182,26 @@ function setupInventorySheet(ss) {
 
 function setupPlannerSheet(ss) {
   let sheet = ss.getSheetByName(SHEET_PLAN);
-  if (!sheet) sheet = ss.insertSheet(SHEET_PLAN, 1);
+  if (!sheet) sheet = ss.insertSheet(SHEET_PLAN, 2);
   else { sheet.clear(); sheet.clearConditionalFormatRules(); }
 
-  sheet.setColumnWidth(1, 185);
-  [2,3,4,5].forEach(c => sheet.setColumnWidth(c, 215));
-  sheet.setRowHeight(PR.HEADER, 40);
-  [PR.HOUSE_DROP,PR.FEAT_DROP,PR.BATCH_DROP,PR.POUR_DROP].forEach(r => sheet.setRowHeight(r, 36));
-  [PR.HOUSE_LBS,PR.FEAT_BURN,PR.FEAT_LBS,PR.BATCH_LBS,PR.POUR_LBS].forEach(r => sheet.setRowHeight(r, 26));
+  // Need col A + 20 day columns = 21 total
+  if (sheet.getMaxColumns() < 21) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), 21 - sheet.getMaxColumns());
+  }
 
-  // Header row background
-  sheet.getRange(1,1,1,5).setBackground('#2C1810').setFontColor('#FFFFFF').setFontWeight('bold');
-  sheet.getRange(1,1).setValue('Program');
+  sheet.setColumnWidth(1, 175);
+  for (let c = 2; c <= 21; c++) sheet.setColumnWidth(c, 95);
+
+  sheet.setRowHeight(PR.WEEK_HDR, 28);
+  sheet.setRowHeight(PR.DAY_HDR, 32);
+  [PR.HOUSE_DROP,PR.FEAT_DROP,PR.BATCH_DROP,PR.POUR_DROP].forEach(r => sheet.setRowHeight(r, 36));
+  [PR.HOUSE_LBS,PR.FEAT_BURN,PR.FEAT_LBS,PR.BATCH_LBS,PR.POUR_LBS].forEach(r => sheet.setRowHeight(r, 24));
+
+  // Label column A
+  sheet.getRange(PR.WEEK_HDR,1).setBackground('#2C1810');
+  sheet.getRange(PR.DAY_HDR,1).setValue('Program').setBackground('#4A2C17')
+    .setFontColor('#FFFFFF').setFontWeight('bold');
 
   // Row labels and colors
   [
@@ -197,31 +217,39 @@ function setupPlannerSheet(ss) {
   ].forEach(([row,label,fg,bg,bold]) => {
     sheet.getRange(row,1).setValue(label).setFontColor(fg).setBackground(bg)
          .setFontWeight(bold?'bold':'normal').setFontSize(bold?11:9);
-    sheet.getRange(row,2,1,4).setBackground(bg);
+    sheet.getRange(row,2,1,20).setBackground(bg);
   });
 
-  // Lbs-remaining formulas for each program × week column
-  ['B','C','D','E'].forEach(col => {
-    const wk = `${col}${PR.HEADER}`;
-    sheet.getRange(`${col}${PR.HOUSE_LBS}`).setFormula(lbsEnd(`${col}${PR.HOUSE_DROP}`,wk,13.6,'House Espresso'));
-    sheet.getRange(`${col}${PR.FEAT_LBS}`).setFormula(lbsEndVar(`${col}${PR.FEAT_DROP}`,wk,`${col}${PR.FEAT_BURN}`));
-    sheet.getRange(`${col}${PR.BATCH_LBS}`).setFormula(lbsEnd(`${col}${PR.BATCH_DROP}`,wk,3.4,'Batch Drip'));
-    sheet.getRange(`${col}${PR.POUR_LBS}`).setFormula(lbsEnd(`${col}${PR.POUR_DROP}`,wk,0.5,'Pour Over'));
-  });
+  // Lbs-remaining formulas for all 20 day columns
+  for (let w = 0; w < 4; w++) {
+    for (let d = 0; d < 5; d++) {
+      const col     = planCol(w, d);
+      const cl      = colLetter(col);
+      const wk      = `${cl}${PR.DAY_HDR}`;
+      const burnCol = colLetter(planCol(w, 0)); // always use that week's Wed burn rate
+      sheet.getRange(PR.HOUSE_LBS, col).setFormula(lbsEnd(`${cl}${PR.HOUSE_DROP}`,wk,13.6,'House Espresso'));
+      sheet.getRange(PR.FEAT_LBS,  col).setFormula(lbsEndVar(`${cl}${PR.FEAT_DROP}`,wk,`${burnCol}${PR.FEAT_BURN}`));
+      sheet.getRange(PR.BATCH_LBS, col).setFormula(lbsEnd(`${cl}${PR.BATCH_DROP}`,wk,3.4,'Batch Drip'));
+      sheet.getRange(PR.POUR_LBS,  col).setFormula(lbsEnd(`${cl}${PR.POUR_DROP}`,wk,0.5,'Pour Over'));
+    }
+  }
 
   [PR.HOUSE_LBS,PR.FEAT_LBS,PR.BATCH_LBS,PR.POUR_LBS].forEach(r =>
-    sheet.getRange(r,2,1,4).setNumberFormat('0.0 "lbs"'));
-  sheet.getRange(PR.FEAT_BURN,2,1,4).setNumberFormat('0.0')
-       .setNote('Enter Featured Espresso burn rate in lbs/week (variable per coffee)');
+    sheet.getRange(r,2,1,20).setNumberFormat('0.0 "lbs"'));
+  sheet.getRange(PR.FEAT_BURN,2,1,20).setNumberFormat('0.0');
+  // FEAT_BURN: user fills in the Wed cell of each week; other days inherit from Wed
+  sheet.getRange(PR.FEAT_BURN,1).setNote(
+    'Enter Featured Espresso burn rate in lbs/week.\n' +
+    'Fill the Wednesday cell of each week — Thu–Sun auto-reference it.');
 
-  // Burn rates note row
-  sheet.getRange(PR.NOTE,1,1,5).merge()
-    .setValue('Burn rates: House Espresso 13.6 lbs/wk  |  Batch Drip 3.4 lbs/wk  |  Pour Over 0.5 lbs/wk  |  Featured: enter manually in row 5')
+  // Note row
+  sheet.getRange(PR.NOTE,1,1,21).merge()
+    .setValue('Fixed burn rates: House 13.6  |  Batch 3.4  |  Pour Over 0.5  (lbs/wk)  |  Featured: enter in each Wed cell')
     .setFontSize(8).setFontColor('#888888').setBackground('#F8F8F8');
 
   // Conditional formatting on lbs cells
   const lbsRanges = [PR.HOUSE_LBS,PR.FEAT_LBS,PR.BATCH_LBS,PR.POUR_LBS]
-    .map(r => sheet.getRange(r,2,1,4));
+    .map(r => sheet.getRange(r,2,1,20));
   sheet.setConditionalFormatRules([
     SpreadsheetApp.newConditionalFormatRule().whenNumberLessThanOrEqualTo(0)
       .setBackground('#F8D7DA').setFontColor('#721C24').setRanges(lbsRanges).build(),
@@ -229,9 +257,9 @@ function setupPlannerSheet(ss) {
       .setBackground('#FFF3CD').setFontColor('#856404').setRanges(lbsRanges).build(),
   ]);
 
-  sheet.setFrozenRows(1);
+  sheet.setFrozenRows(2);
   sheet.setFrozenColumns(1);
-  Logger.log('✓ Planner sheet ready');
+  Logger.log('✓ Planner sheet ready (daily, 20 working days)');
 }
 
 // Lbs at END of week — fixed burn rate program
@@ -265,19 +293,23 @@ function lbsEndVar(dropCell, weekCell, burnRateCell) {
 
 function setupDashboardSheet(ss) {
   let sheet = ss.getSheetByName(SHEET_DASH);
-  if (!sheet) sheet = ss.insertSheet(SHEET_DASH, 2);
+  if (!sheet) sheet = ss.insertSheet(SHEET_DASH, 3);
   else { sheet.clear(); sheet.clearConditionalFormatRules(); }
 
   sheet.setColumnWidth(1, 185);
   [2,3,4,5].forEach(c => sheet.setColumnWidth(c, 215));
 
-  // Header — week dates mirror Planner
+  // Dashboard shows one column per week, referencing the Wednesday (first day) of each week
+  // Planner week starts: col B (wk1), G (wk2), L (wk3), Q (wk4)
+  const WED_COLS = ['B','G','L','Q'];
+
   sheet.getRange(1,1,1,5).setBackground('#2C1810').setFontColor('#FFFFFF').setFontWeight('bold');
   sheet.getRange(1,1).setValue('Program');
-  ['B','C','D','E'].forEach(col =>
-    sheet.getRange(`${col}1`).setFormula(`='Program Planner'!${col}1`)
-         .setNumberFormat('MMM D').setHorizontalAlignment('center')
-         .setFontWeight('bold').setFontColor('#FFFFFF'));
+  WED_COLS.forEach((col, wi) =>
+    sheet.getRange(1, wi+2)
+      .setFormula(`='Program Planner'!${col}${PR.DAY_HDR}`)
+      .setNumberFormat('"Wk" MMM D')
+      .setHorizontalAlignment('center').setFontWeight('bold').setFontColor('#FFFFFF'));
 
   // Program rows
   const P = "'Program Planner'";
@@ -290,10 +322,10 @@ function setupDashboardSheet(ss) {
     sheet.getRange(prog.row,1).setValue(prog.name).setFontWeight('bold');
     sheet.setRowHeight(prog.row, 65);
 
-    ['B','C','D','E'].forEach((col, wi) => {
+    WED_COLS.forEach((col, wi) => {
       const coffee = `${P}!${col}${prog.dr}`;
       const lbs    = `${P}!${col}${prog.lr}`;
-      const wk     = `${P}!${col}${PR.HEADER}`;
+      const wk     = `${P}!${col}${PR.DAY_HDR}`;
       const br     = prog.br
         ? prog.br
         : `IF(ISNUMBER(${P}!${col}${prog.brr}),${P}!${col}${prog.brr},2)`;
@@ -317,7 +349,7 @@ function setupDashboardSheet(ss) {
   // Summary row
   sheet.setRowHeight(6, 80);
   sheet.getRange(6,1).setValue('Weekly Summary').setFontWeight('bold').setBackground('#F5F5F5');
-  ['B','C','D','E'].forEach((col, wi) => {
+  WED_COLS.forEach((col, wi) => {
     sheet.getRange(6, wi+2).setFormula(
       `=LET(hl,IF(ISNUMBER(${P}!${col}${PR.HOUSE_LBS}),${P}!${col}${PR.HOUSE_LBS},0),` +
       `fl,IF(ISNUMBER(${P}!${col}${PR.FEAT_LBS}),${P}!${col}${PR.FEAT_LBS},0),` +
@@ -376,7 +408,7 @@ function setupDashboardSheet(ss) {
 // ================================================================
 
 // Auto-detects how many weeks have passed and catches up in one shot.
-// Safe to run whether you're 1 week behind or 3 — past weeks are cleared.
+// Past weeks are cleared; lbs rows are formulas and auto-update.
 function advanceWeek() {
   const ss   = SpreadsheetApp.getActiveSpreadsheet();
   const plan = ss.getSheetByName(SHEET_PLAN);
@@ -385,40 +417,40 @@ function advanceWeek() {
     return;
   }
 
-  const colBVal = plan.getRange(1, 2).getValue();
+  // Col B = day 0 of week 0 (this week's Wednesday)
+  const colBVal = plan.getRange(PR.DAY_HDR, 2).getValue();
   if (!(colBVal instanceof Date)) {
-    SpreadsheetApp.getUi().alert('No week date found in planner header. Run Full Setup first.');
+    SpreadsheetApp.getUi().alert('No date found in planner. Run Full Setup first.');
     return;
   }
 
-  // Current week's Wednesday
-  const today   = new Date();
-  const day     = today.getDay();
-  const monday  = new Date(today);
+  const today  = new Date();
+  const day    = today.getDay();
+  const monday = new Date(today);
   monday.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
   monday.setHours(0, 0, 0, 0);
   const thisWed = new Date(monday);
   thisWed.setDate(monday.getDate() + 2);
 
-  const msPerWeek  = 7 * 24 * 60 * 60 * 1000;
-  const weeksOld   = Math.round((thisWed - colBVal) / msPerWeek);
+  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+  const weeksOld  = Math.round((thisWed - colBVal) / msPerWeek);
 
   if (weeksOld <= 0) {
     SpreadsheetApp.getUi().alert('Planner is already current — nothing to advance.');
     return;
   }
 
-  // Rows that hold operator-entered data (selections + featured burn rate)
+  // Only user-entered rows need shifting (lbs rows are formulas, they auto-update)
   const dataRows = [PR.HOUSE_DROP, PR.FEAT_DROP, PR.FEAT_BURN, PR.BATCH_DROP, PR.POUR_DROP];
 
-  // Shift left once per elapsed week; values that fall off the left are gone
+  // Each week = 5 day-columns; shift left by 5 per elapsed week
   for (let w = 0; w < weeksOld; w++) {
     dataRows.forEach(row => {
-      const vals = plan.getRange(row, 2, 1, 4).getValues()[0]; // [B, C, D, E]
-      plan.getRange(row, 2).setValue(vals[1]); // C → B
-      plan.getRange(row, 3).setValue(vals[2]); // D → C
-      plan.getRange(row, 4).setValue(vals[3]); // E → D
-      plan.getRange(row, 5).clearContent();    // clear rightmost (new week)
+      const vals = plan.getRange(row, 2, 1, 20).getValues()[0]; // 20 day cols B–U
+      for (let c = 0; c < 15; c++) {                           // shift left by 5
+        plan.getRange(row, 2 + c).setValue(vals[c + 5] !== undefined ? vals[c + 5] : '');
+      }
+      plan.getRange(row, 17, 1, 5).clearContent();             // clear new week 4
     });
   }
 
@@ -429,48 +461,72 @@ function advanceWeek() {
   SpreadsheetApp.getUi().alert(
     `✓ Advanced ${wkLabel} — planner is now current.\n\n` +
     'Past week selections have been cleared.\n' +
-    'Fill in any empty columns to complete the plan.'
+    'Fill in the new rightmost week to complete the plan.'
   );
 }
 
-// Updates week date headers in the Planner (called by advanceWeek and setupAll)
-// Shows Wednesday as the week start — shop is open Wed–Sun
+// Writes week group headers (row 1, merged) and day headers (row 2) for all 20 days
 function refreshWeekDates() {
   const ss   = SpreadsheetApp.getActiveSpreadsheet();
   const plan = ss.getSheetByName(SHEET_PLAN);
   if (!plan) return;
 
-  const today  = new Date();
-  const day    = today.getDay();
-  // Find this week's Monday, then step forward to Wednesday (+2)
-  const monday = new Date(today);
+  const today     = new Date();
+  const day       = today.getDay();
+  const monday    = new Date(today);
   monday.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
   monday.setHours(0, 0, 0, 0);
   const wednesday = new Date(monday);
   wednesday.setDate(monday.getDate() + 2);
 
-  [0,1,2,3].forEach(offset => {
-    const d = new Date(wednesday);
-    d.setDate(wednesday.getDate() + offset * 7);
-    const end = new Date(d);
-    end.setDate(d.getDate() + 4); // Wed + 4 = Sun
+  const DAY_NAMES = ['Wed','Thu','Fri','Sat','Sun'];
 
-    const cell = plan.getRange(1, offset + 2);
-    cell.setValue(d)
-        .setNumberFormat('MMM D')
+  for (let w = 0; w < 4; w++) {
+    const wedDate = new Date(wednesday);
+    wedDate.setDate(wednesday.getDate() + w * 7);
+    const sunDate = new Date(wedDate);
+    sunDate.setDate(wedDate.getDate() + 4);
+    const wStartCol = planCol(w, 0);
+
+    // Merged week group header
+    const wLabel =
+      wedDate.toLocaleDateString('en-US',{month:'short',day:'numeric'}) +
+      ' – ' +
+      sunDate.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+    sheet_mergeWeekHdr(plan, PR.WEEK_HDR, wStartCol, wLabel);
+
+    // Individual day headers
+    for (let d = 0; d < 5; d++) {
+      const col     = planCol(w, d);
+      const dayDate = new Date(wedDate);
+      dayDate.setDate(wedDate.getDate() + d);
+      plan.getRange(PR.DAY_HDR, col)
+        .setValue(dayDate)
+        .setNumberFormat(`"${DAY_NAMES[d]}" M/D`)
         .setHorizontalAlignment('center')
         .setFontWeight('bold')
         .setFontColor('#FFFFFF')
-        .setNote(
-          d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}) +
-          ' – ' +
-          end.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})
-        );
-  });
-  Logger.log('✓ Week dates updated (Wed–Sun)');
+        .setBackground('#4A2C17');
+    }
+  }
+
+  // Label cell
+  plan.getRange(PR.DAY_HDR, 1).setValue('Program')
+    .setBackground('#4A2C17').setFontColor('#FFFFFF').setFontWeight('bold');
+
+  Logger.log('✓ Week dates updated (daily Wed–Sun)');
 }
 
-// Refreshes planner dropdown options from current inventory state
+function sheet_mergeWeekHdr(sheet, row, startCol, label) {
+  try { sheet.getRange(row, startCol, 1, 5).breakApart(); } catch(e) {}
+  sheet.getRange(row, startCol, 1, 5).merge()
+    .setValue(label)
+    .setBackground('#2C1810').setFontColor('#FFFFFF')
+    .setFontWeight('bold').setHorizontalAlignment('center').setFontSize(10);
+}
+
+// Refreshes planner dropdown options from current inventory.
+// Each week's 5 day-columns all get the same options (based on that week's Wednesday).
 function refreshDropdowns() {
   const ss   = SpreadsheetApp.getActiveSpreadsheet();
   const plan = ss.getSheetByName(SHEET_PLAN);
@@ -481,8 +537,10 @@ function refreshDropdowns() {
   if (lastRow < 2) { Logger.log('No inventory data yet'); return; }
 
   const invData = inv.getRange(2, 1, lastRow - 1, 33).getValues();
-  const weeks   = [2,3,4,5].map(col => {
-    const v = plan.getRange(1, col).getValue();
+
+  // Get Wednesday date for each of 4 weeks from the DAY_HDR row
+  const weekDates = [0,1,2,3].map(w => {
+    const v = plan.getRange(PR.DAY_HDR, planCol(w, 0)).getValue();
     return (v instanceof Date) ? v : null;
   });
 
@@ -492,22 +550,24 @@ function refreshDropdowns() {
     {name:'Batch Drip',        burnRate:3.4,  dropRow:PR.BATCH_DROP},
     {name:'Pour Over',         burnRate:0.5,  dropRow:PR.POUR_DROP },
   ].forEach(prog => {
-    weeks.forEach((weekDate, wi) => {
+    weekDates.forEach((weekDate, w) => {
       if (!weekDate) return;
       const available = getAvailableCoffees(invData, prog.name, weekDate, prog.burnRate);
       const list = available.length > 0 ? available : ['⚠ Nothing available'];
-      plan.getRange(prog.dropRow, wi + 2).setDataValidation(
-        SpreadsheetApp.newDataValidation()
-          .requireValueInList(list, true)
-          .setAllowInvalid(true)
-          .setHelpText(available.length > 0
-            ? `${available.length} option(s) ready for ${prog.name}`
-            : `No coffees ready for ${prog.name} this week — check Inventory`)
-          .build()
-      );
+      const validation = SpreadsheetApp.newDataValidation()
+        .requireValueInList(list, true)
+        .setAllowInvalid(true)
+        .setHelpText(available.length > 0
+          ? `${available.length} option(s) ready for ${prog.name}`
+          : `No coffees ready for ${prog.name} this week — check Inventory`)
+        .build();
+      // Apply same dropdown to all 5 days of this week
+      for (let d = 0; d < 5; d++) {
+        plan.getRange(prog.dropRow, planCol(w, d)).setDataValidation(validation);
+      }
     });
   });
-  Logger.log('✓ Dropdowns refreshed');
+  Logger.log('✓ Dropdowns refreshed (20 days)');
 }
 
 // Returns display names of brewing inventory available for a program/week
@@ -552,7 +612,7 @@ function getAvailableCoffees(invData, programName, weekDate, burnRate) {
 
 function setupStatusSheet(ss) {
   let sheet = ss.getSheetByName(SHEET_STATUS);
-  if (!sheet) sheet = ss.insertSheet(SHEET_STATUS, 3);
+  if (!sheet) sheet = ss.insertSheet(SHEET_STATUS, 1);
   else { sheet.clear(); sheet.clearConditionalFormatRules(); }
 
   sheet.setColumnWidth(1, 170);

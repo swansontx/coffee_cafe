@@ -123,7 +123,7 @@ function setupInventorySheet(ss) {
 
   // Array formulas — one per calculated column, spills down automatically
   [
-    [2, 8,  '=ARRAYFORMULA(IF((F2:F<>"")*(G2:G<>""),F2:F*G2:G,""))'],
+    [2, 8,  '=ARRAYFORMULA(IF((F2:F<>"")*(G2:G<>""),VALUE(REGEXEXTRACT(F2:F,"[0-9.]+"))*G2:G,""))'],
     [2, 11, '=ARRAYFORMULA(IF((J2:J<>"")*(G2:G<>""),J2:J*G2:G,""))'],
     [2, 12, '=ARRAYFORMULA(IF((B2:B<>"")*(C2:C<>""),B2:B&" · "&C2:C,""))'],
     [2, 18, '=ARRAYFORMULA(IF((E2:E<>"")*(Q2:Q<>""),E2:E+Q2:Q,""))'],

@@ -74,7 +74,7 @@ function setupAll() {
 
 function rebuildStatusSheet() {
   setupStatusSheet(SpreadsheetApp.getActiveSpreadsheet());
-  SpreadsheetApp.getUi().alert('✓ Current Status sheet rebuilt.');
+  SpreadsheetApp.getUi().alert('✓ Program Planner sheet rebuilt.');
 }
 
 // ================================================================
@@ -190,6 +190,9 @@ function setupPlannerSheet(ss) {
     sheet.insertColumnsAfter(sheet.getMaxColumns(), 21 - sheet.getMaxColumns());
   }
 
+  // Break any pre-existing merges (sheet.clear() doesn't touch merges)
+  try { sheet.getRange(1,1,sheet.getMaxRows(),sheet.getMaxColumns()).breakApart(); } catch(e) {}
+
   sheet.setColumnWidth(1, 175);
   for (let c = 2; c <= 21; c++) sheet.setColumnWidth(c, 95);
 
@@ -296,6 +299,8 @@ function setupDashboardSheet(ss) {
   if (!sheet) sheet = ss.insertSheet(SHEET_DASH, 3);
   else { sheet.clear(); sheet.clearConditionalFormatRules(); }
 
+  try { sheet.getRange(1,1,sheet.getMaxRows(),sheet.getMaxColumns()).breakApart(); } catch(e) {}
+
   sheet.setColumnWidth(1, 185);
   [2,3,4,5].forEach(c => sheet.setColumnWidth(c, 215));
 
@@ -307,12 +312,12 @@ function setupDashboardSheet(ss) {
   sheet.getRange(1,1).setValue('Program');
   WED_COLS.forEach((col, wi) =>
     sheet.getRange(1, wi+2)
-      .setFormula(`='Program Planner'!${col}${PR.DAY_HDR}`)
+      .setFormula(`='Daily Planner'!${col}${PR.DAY_HDR}`)
       .setNumberFormat('"Wk" MMM D')
       .setHorizontalAlignment('center').setFontWeight('bold').setFontColor('#FFFFFF'));
 
   // Program rows
-  const P = "'Program Planner'";
+  const P = "'Daily Planner'";
   [
     {row:2, name:'House Espresso',    dr:PR.HOUSE_DROP, lr:PR.HOUSE_LBS, br:13.6},
     {row:3, name:'Featured Espresso', dr:PR.FEAT_DROP,  lr:PR.FEAT_LBS,  br:null, brr:PR.FEAT_BURN},
@@ -614,6 +619,8 @@ function setupStatusSheet(ss) {
   let sheet = ss.getSheetByName(SHEET_STATUS);
   if (!sheet) sheet = ss.insertSheet(SHEET_STATUS, 1);
   else { sheet.clear(); sheet.clearConditionalFormatRules(); }
+
+  try { sheet.getRange(1,1,sheet.getMaxRows(),sheet.getMaxColumns()).breakApart(); } catch(e) {}
 
   sheet.setColumnWidth(1, 170);
   sheet.setColumnWidth(2, 85);

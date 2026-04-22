@@ -190,6 +190,11 @@ function setupPlannerSheet(ss) {
     sheet.insertColumnsAfter(sheet.getMaxColumns(), 21 - sheet.getMaxColumns());
   }
 
+  // Reset frozen rows/columns — sheet.clear() doesn't clear these,
+  // and frozen-boundary merges fail if freeze state carries over from a prior run
+  try { sheet.setFrozenRows(0);    } catch(e) {}
+  try { sheet.setFrozenColumns(0); } catch(e) {}
+
   // Break any pre-existing merges (sheet.clear() doesn't touch merges)
   try { sheet.getRange(1,1,sheet.getMaxRows(),sheet.getMaxColumns()).breakApart(); } catch(e) {}
 
@@ -250,13 +255,36 @@ function setupPlannerSheet(ss) {
     .setValue('Fixed burn rates: House 13.6  |  Batch 3.4  |  Pour Over 0.5  (lbs/wk)  |  Featured: enter in each Wed cell')
     .setFontSize(8).setFontColor('#888888').setBackground('#F8F8F8');
 
-  // Conditional formatting on lbs cells
-  const lbsRanges = [PR.HOUSE_LBS,PR.FEAT_LBS,PR.BATCH_LBS,PR.POUR_LBS]
-    .map(r => sheet.getRange(r,2,1,20));
+  // Conditional formatting — dropdown rows: color by coffee's readiness status in Inventory
+  // Formula uses relative ref (B{row}) so it adjusts for each cell across the 20-day range
+  const dropRules = [];
+  [PR.HOUSE_DROP, PR.FEAT_DROP, PR.BATCH_DROP, PR.POUR_DROP].forEach(row => {
+    const range = [sheet.getRange(row, 2, 1, 20)];
+    const ref   = `B${row}`;
+    [
+      ['Active',     '#D4EDDA', '#155724'],
+      ['Ready',      '#CCF5F1', '#0C5460'],
+      ['Resting',    '#E2D9F3', '#4B2B7A'],
+      ['In Transit', '#CCE5FF', '#004085'],
+      ['Ordered',    '#F8F9FA', '#6C757D'],
+    ].forEach(([status, bg, fg]) => {
+      dropRules.push(
+        SpreadsheetApp.newConditionalFormatRule()
+          .whenFormulaSatisfied(
+            `=IFERROR(INDEX(Inventory!$X:$X,MATCH(${ref},Inventory!$L:$L,0))="${status}",FALSE)`)
+          .setBackground(bg).setFontColor(fg).setRanges(range).build()
+      );
+    });
+  });
+
+  // Conditional formatting — lbs rows: warn when running low or depleted
+  const lbsRanges = [PR.HOUSE_LBS, PR.FEAT_LBS, PR.BATCH_LBS, PR.POUR_LBS]
+    .map(r => sheet.getRange(r, 2, 1, 20));
   sheet.setConditionalFormatRules([
+    ...dropRules,
     SpreadsheetApp.newConditionalFormatRule().whenNumberLessThanOrEqualTo(0)
       .setBackground('#F8D7DA').setFontColor('#721C24').setRanges(lbsRanges).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenNumberBetween(0.01,5)
+    SpreadsheetApp.newConditionalFormatRule().whenNumberBetween(0.01, 5)
       .setBackground('#FFF3CD').setFontColor('#856404').setRanges(lbsRanges).build(),
   ]);
 
@@ -270,30 +298,37 @@ function setupPlannerSheet(ss) {
   Logger.log('✓ Planner sheet ready (daily, 20 working days)');
 }
 
-// Writes week group headers (row 1 merged) + day headers (row 2) for 20 days
-// Pulled out so both setupPlannerSheet and refreshWeekDates can use it
+// Writes week group headers (row 1 merged) + day headers (row 2) for 20 days.
+// Pulled out so both setupPlannerSheet and refreshWeekDates can use it.
 function _writeHeaderDates(plan) {
+  const tz        = Session.getScriptTimeZone();
   const today     = new Date();
   const dayOfWeek = today.getDay();
-  const monday    = new Date(today);
+
+  // Find this week's Monday (local time), then Wednesday
+  const monday = new Date(today);
   monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
   monday.setHours(0, 0, 0, 0);
   const wednesday = new Date(monday);
   wednesday.setDate(monday.getDate() + 2);
+  wednesday.setHours(0, 0, 0, 0);
 
   const DAY_NAMES = ['Wed','Thu','Fri','Sat','Sun'];
 
   for (let w = 0; w < 4; w++) {
     const wedDate = new Date(wednesday);
     wedDate.setDate(wednesday.getDate() + w * 7);
+    wedDate.setHours(0, 0, 0, 0);
+
     const sunDate = new Date(wedDate);
     sunDate.setDate(wedDate.getDate() + 4);
-    const wStartCol = planCol(w, 0);
+    sunDate.setHours(0, 0, 0, 0);
 
+    const wStartCol = planCol(w, 0);
     const wLabel =
-      wedDate.toLocaleDateString('en-US',{month:'short',day:'numeric'}) +
-      ' – ' +
-      sunDate.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      Utilities.formatDate(wedDate, tz, 'MMM d') + ' – ' +
+      Utilities.formatDate(sunDate, tz, 'MMM d');
+
     try { plan.getRange(PR.WEEK_HDR, wStartCol, 1, 5).breakApart(); } catch(e) {}
     plan.getRange(PR.WEEK_HDR, wStartCol, 1, 5).merge()
       .setValue(wLabel)
@@ -304,6 +339,7 @@ function _writeHeaderDates(plan) {
       const col     = planCol(w, d);
       const dayDate = new Date(wedDate);
       dayDate.setDate(wedDate.getDate() + d);
+      dayDate.setHours(0, 0, 0, 0);
       plan.getRange(PR.DAY_HDR, col)
         .setValue(dayDate)
         .setNumberFormat(`"${DAY_NAMES[d]}" M/D`)
@@ -316,31 +352,32 @@ function _writeHeaderDates(plan) {
 
   plan.getRange(PR.DAY_HDR, 1).setValue('Program')
     .setBackground('#4A2C17').setFontColor('#FFFFFF').setFontWeight('bold');
+  Logger.log('✓ Header dates written for week of ' + Utilities.formatDate(wednesday, tz, 'MMM d, yyyy'));
 }
 
-// Lbs at END of week — fixed burn rate program
-function lbsEnd(dropCell, weekCell, burnRate, programName) {
+// Lbs remaining at a specific day — fixed burn rate program
+// dy = days since activation (Sheets dates are serial numbers, subtraction gives days directly)
+function lbsEnd(dropCell, dayCell, burnRate, programName) {
   return `=IFERROR(IF(${dropCell}="","",LET(` +
     `r,MATCH(${dropCell},Inventory!$L:$L,0),` +
     `ip,INDEX(Inventory!$M:$M,r)="${programName}",` +
     `al,IF(ip,INDEX(Inventory!$O:$O,r),INDEX(Inventory!$P:$P,r)),` +
     `ac,INDEX(Inventory!$U:$U,r),` +
-    `wk,IF(AND(ISNUMBER(ac),ac<=${weekCell}),MAX(0,INT((${weekCell}-ac)/7)),0),` +
-    `s,MAX(0,ROUND(al-${burnRate}*wk,1)),` +
-    `MAX(0,ROUND(s-${burnRate},1)))),"")`;
+    `dy,IF(AND(ISNUMBER(ac),ac<=${dayCell}),${dayCell}-ac,0),` +
+    `MAX(0,ROUND(al-(${burnRate}/7)*dy,1)))),"")`;
 }
 
-// Lbs at END of week — variable burn rate (Featured Espresso)
-function lbsEndVar(dropCell, weekCell, burnRateCell) {
+// Lbs remaining at a specific day — variable burn rate (Featured Espresso)
+// burnRateCell holds lbs/wk entered by user; divide by 7 for daily rate
+function lbsEndVar(dropCell, dayCell, burnRateCell) {
   return `=IFERROR(IF(OR(${dropCell}="",${burnRateCell}=""),"",LET(` +
     `r,MATCH(${dropCell},Inventory!$L:$L,0),` +
     `ip,INDEX(Inventory!$M:$M,r)="Featured Espresso",` +
     `al,IF(ip,INDEX(Inventory!$O:$O,r),INDEX(Inventory!$P:$P,r)),` +
     `ac,INDEX(Inventory!$U:$U,r),` +
-    `br,${burnRateCell},` +
-    `wk,IF(AND(ISNUMBER(ac),ac<=${weekCell}),MAX(0,INT((${weekCell}-ac)/7)),0),` +
-    `s,MAX(0,ROUND(al-br*wk,1)),` +
-    `MAX(0,ROUND(s-br,1)))),"")`;
+    `br,${burnRateCell}/7,` +
+    `dy,IF(AND(ISNUMBER(ac),ac<=${dayCell}),${dayCell}-ac,0),` +
+    `MAX(0,ROUND(al-br*dy,1)))),"")`;
 }
 
 // ================================================================
@@ -352,6 +389,8 @@ function setupDashboardSheet(ss) {
   if (!sheet) sheet = ss.insertSheet(SHEET_DASH, 3);
   else { sheet.clear(); sheet.clearConditionalFormatRules(); }
 
+  try { sheet.setFrozenRows(0);    } catch(e) {}
+  try { sheet.setFrozenColumns(0); } catch(e) {}
   try { sheet.getRange(1,1,sheet.getMaxRows(),sheet.getMaxColumns()).breakApart(); } catch(e) {}
 
   sheet.setColumnWidth(1, 185);
@@ -533,7 +572,8 @@ function refreshWeekDates() {
 }
 
 // Refreshes planner dropdown options from current inventory.
-// Each week's 5 day-columns all get the same options (based on that week's Wednesday).
+// Each of the 20 day-columns gets its own filtered list based on that day's date,
+// so depleted coffees disappear from dropdowns as lbs run out day by day.
 function refreshDropdowns() {
   const ss   = SpreadsheetApp.getActiveSpreadsheet();
   const plan = ss.getSheetByName(SHEET_PLAN);
@@ -545,11 +585,15 @@ function refreshDropdowns() {
 
   const invData = inv.getRange(2, 1, lastRow - 1, 33).getValues();
 
-  // Get Wednesday date for each of 4 weeks from the DAY_HDR row
-  const weekDates = [0,1,2,3].map(w => {
-    const v = plan.getRange(PR.DAY_HDR, planCol(w, 0)).getValue();
-    return (v instanceof Date) ? v : null;
-  });
+  // Read all 20 individual day dates from the header row
+  const dayDates = [];
+  for (let w = 0; w < 4; w++) {
+    dayDates[w] = [];
+    for (let d = 0; d < 5; d++) {
+      const v = plan.getRange(PR.DAY_HDR, planCol(w, d)).getValue();
+      dayDates[w][d] = (v instanceof Date) ? v : null;
+    }
+  }
 
   [
     {name:'House Espresso',    burnRate:13.6, dropRow:PR.HOUSE_DROP},
@@ -557,55 +601,62 @@ function refreshDropdowns() {
     {name:'Batch Drip',        burnRate:3.4,  dropRow:PR.BATCH_DROP},
     {name:'Pour Over',         burnRate:0.5,  dropRow:PR.POUR_DROP },
   ].forEach(prog => {
-    weekDates.forEach((weekDate, w) => {
-      if (!weekDate) return;
-      const available = getAvailableCoffees(invData, prog.name, weekDate, prog.burnRate);
-      const list = available.length > 0 ? available : ['⚠ Nothing available'];
-      const validation = SpreadsheetApp.newDataValidation()
-        .requireValueInList(list, true)
-        .setAllowInvalid(true)
-        .setHelpText(available.length > 0
-          ? `${available.length} option(s) ready for ${prog.name}`
-          : `No coffees ready for ${prog.name} this week — check Inventory`)
-        .build();
-      // Apply same dropdown to all 5 days of this week
+    for (let w = 0; w < 4; w++) {
       for (let d = 0; d < 5; d++) {
+        const dayDate = dayDates[w][d];
+        if (!dayDate) continue;
+        const available = getAvailableCoffees(invData, prog.name, dayDate, prog.burnRate);
+        const list = available.length > 0 ? available : ['— nothing available —'];
+        const validation = SpreadsheetApp.newDataValidation()
+          .requireValueInList(list, true)
+          .setAllowInvalid(false)   // enforce: only listed coffees allowed
+          .setHelpText(available.length > 0
+            ? `${available.length} coffee(s) available for ${prog.name} this day`
+            : `No coffees available for ${prog.name} — check brew-ready date and lbs`)
+          .build();
         plan.getRange(prog.dropRow, planCol(w, d)).setDataValidation(validation);
       }
-    });
+    }
   });
-  Logger.log('✓ Dropdowns refreshed (20 days)');
+  Logger.log('✓ Dropdowns refreshed — per-day availability (20 days)');
 }
 
-// Returns display names of brewing inventory available for a program/week
-function getAvailableCoffees(invData, programName, weekDate, burnRate) {
-  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
-  const result = [];
+// Returns display names of coffees available for a program on a specific day.
+// Filters: must be brewing type, match program (primary or secondary),
+// not finished, brew-ready by that day, and have lbs remaining at that day.
+function getAvailableCoffees(invData, programName, dayDate, burnRate) {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const result   = [];
 
   for (const row of invData) {
     if (row[IC.TYPE] !== 'brewing') continue;
     const displayName = row[IC.DISPLAY_NAME];
     if (!displayName) continue;
 
+    // Must match program in either primary or secondary slot
     const primary   = row[IC.PRIMARY];
     const secondary = row[IC.SECONDARY];
     if (primary !== programName && secondary !== programName) continue;
 
+    // Skip finished coffees
     const actualEnd = row[IC.ACTUAL_END];
     if (actualEnd instanceof Date || (typeof actualEnd === 'string' && actualEnd !== '')) continue;
 
+    // Skip coffees that aren't brew-ready yet on this day
     const brewReady = row[IC.BREW_READY];
-    if (brewReady instanceof Date && brewReady > weekDate) continue;
+    if (brewReady instanceof Date && brewReady > dayDate) continue;
 
+    // Use primary alloc if this is the primary program, secondary otherwise
     const isPrimary = primary === programName;
     const alloc     = isPrimary ? row[IC.ALLOC_PRI] : row[IC.ALLOC_SEC];
     if (!alloc || alloc <= 0) continue;
 
+    // Day-level depletion: lbs = alloc - (burnRate/7) * daysActive
     const activated = row[IC.ACTIVATED];
     let lbsLeft = alloc;
-    if (activated instanceof Date && activated <= weekDate) {
-      const wks = Math.floor((weekDate - activated) / msPerWeek);
-      lbsLeft = Math.max(0, alloc - burnRate * wks);
+    if (activated instanceof Date && activated <= dayDate) {
+      const days = Math.round((dayDate - activated) / msPerDay);
+      lbsLeft = Math.max(0, alloc - (burnRate / 7) * days);
     }
 
     if (lbsLeft > 0) result.push(displayName);
@@ -622,6 +673,8 @@ function setupStatusSheet(ss) {
   if (!sheet) sheet = ss.insertSheet(SHEET_STATUS, 1);
   else { sheet.clear(); sheet.clearConditionalFormatRules(); }
 
+  try { sheet.setFrozenRows(0);    } catch(e) {}
+  try { sheet.setFrozenColumns(0); } catch(e) {}
   try { sheet.getRange(1,1,sheet.getMaxRows(),sheet.getMaxColumns()).breakApart(); } catch(e) {}
 
   sheet.setColumnWidth(1, 170);

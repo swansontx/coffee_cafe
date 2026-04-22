@@ -190,13 +190,14 @@ function setupPlannerSheet(ss) {
     sheet.insertColumnsAfter(sheet.getMaxColumns(), 21 - sheet.getMaxColumns());
   }
 
-  // Reset frozen rows/columns — sheet.clear() doesn't clear these,
-  // and frozen-boundary merges fail if freeze state carries over from a prior run
+  // breakApart FIRST (removing merges is always safe regardless of freeze state),
+  // then reset freeze, then immediately re-freeze — this way all merges we create
+  // below are guaranteed to be in unfrozen columns (B onward), never crossing A.
+  try { sheet.getRange(1,1,sheet.getMaxRows(),sheet.getMaxColumns()).breakApart(); } catch(e) {}
   try { sheet.setFrozenRows(0);    } catch(e) {}
   try { sheet.setFrozenColumns(0); } catch(e) {}
-
-  // Break any pre-existing merges (sheet.clear() doesn't touch merges)
-  try { sheet.getRange(1,1,sheet.getMaxRows(),sheet.getMaxColumns()).breakApart(); } catch(e) {}
+  sheet.setFrozenRows(2);
+  sheet.setFrozenColumns(1);
 
   sheet.setColumnWidth(1, 175);
   for (let c = 2; c <= 21; c++) sheet.setColumnWidth(c, 95);
@@ -339,9 +340,6 @@ function setupPlannerSheet(ss) {
       .setBackground('#F8D7DA').setFontColor('#721C24').setRanges(allLbsRanges).build(),
     ...lbsLowRules,
   ]);
-
-  sheet.setFrozenRows(2);
-  sheet.setFrozenColumns(1);
 
   // Populate week/day header dates so the sheet is usable immediately
   // (setupAll also calls refreshWeekDates later, but call here for safety)

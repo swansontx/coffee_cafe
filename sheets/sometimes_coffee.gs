@@ -262,7 +262,60 @@ function setupPlannerSheet(ss) {
 
   sheet.setFrozenRows(2);
   sheet.setFrozenColumns(1);
+
+  // Populate week/day header dates so the sheet is usable immediately
+  // (setupAll also calls refreshWeekDates later, but call here for safety)
+  _writeHeaderDates(sheet);
+
   Logger.log('✓ Planner sheet ready (daily, 20 working days)');
+}
+
+// Writes week group headers (row 1 merged) + day headers (row 2) for 20 days
+// Pulled out so both setupPlannerSheet and refreshWeekDates can use it
+function _writeHeaderDates(plan) {
+  const today     = new Date();
+  const dayOfWeek = today.getDay();
+  const monday    = new Date(today);
+  monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+  monday.setHours(0, 0, 0, 0);
+  const wednesday = new Date(monday);
+  wednesday.setDate(monday.getDate() + 2);
+
+  const DAY_NAMES = ['Wed','Thu','Fri','Sat','Sun'];
+
+  for (let w = 0; w < 4; w++) {
+    const wedDate = new Date(wednesday);
+    wedDate.setDate(wednesday.getDate() + w * 7);
+    const sunDate = new Date(wedDate);
+    sunDate.setDate(wedDate.getDate() + 4);
+    const wStartCol = planCol(w, 0);
+
+    const wLabel =
+      wedDate.toLocaleDateString('en-US',{month:'short',day:'numeric'}) +
+      ' – ' +
+      sunDate.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+    try { plan.getRange(PR.WEEK_HDR, wStartCol, 1, 5).breakApart(); } catch(e) {}
+    plan.getRange(PR.WEEK_HDR, wStartCol, 1, 5).merge()
+      .setValue(wLabel)
+      .setBackground('#2C1810').setFontColor('#FFFFFF')
+      .setFontWeight('bold').setHorizontalAlignment('center').setFontSize(10);
+
+    for (let d = 0; d < 5; d++) {
+      const col     = planCol(w, d);
+      const dayDate = new Date(wedDate);
+      dayDate.setDate(wedDate.getDate() + d);
+      plan.getRange(PR.DAY_HDR, col)
+        .setValue(dayDate)
+        .setNumberFormat(`"${DAY_NAMES[d]}" M/D`)
+        .setHorizontalAlignment('center')
+        .setFontWeight('bold')
+        .setFontColor('#FFFFFF')
+        .setBackground('#4A2C17');
+    }
+  }
+
+  plan.getRange(PR.DAY_HDR, 1).setValue('Program')
+    .setBackground('#4A2C17').setFontColor('#FFFFFF').setFontWeight('bold');
 }
 
 // Lbs at END of week — fixed burn rate program
@@ -475,59 +528,8 @@ function refreshWeekDates() {
   const ss   = SpreadsheetApp.getActiveSpreadsheet();
   const plan = ss.getSheetByName(SHEET_PLAN);
   if (!plan) return;
-
-  const today     = new Date();
-  const day       = today.getDay();
-  const monday    = new Date(today);
-  monday.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
-  monday.setHours(0, 0, 0, 0);
-  const wednesday = new Date(monday);
-  wednesday.setDate(monday.getDate() + 2);
-
-  const DAY_NAMES = ['Wed','Thu','Fri','Sat','Sun'];
-
-  for (let w = 0; w < 4; w++) {
-    const wedDate = new Date(wednesday);
-    wedDate.setDate(wednesday.getDate() + w * 7);
-    const sunDate = new Date(wedDate);
-    sunDate.setDate(wedDate.getDate() + 4);
-    const wStartCol = planCol(w, 0);
-
-    // Merged week group header
-    const wLabel =
-      wedDate.toLocaleDateString('en-US',{month:'short',day:'numeric'}) +
-      ' – ' +
-      sunDate.toLocaleDateString('en-US',{month:'short',day:'numeric'});
-    sheet_mergeWeekHdr(plan, PR.WEEK_HDR, wStartCol, wLabel);
-
-    // Individual day headers
-    for (let d = 0; d < 5; d++) {
-      const col     = planCol(w, d);
-      const dayDate = new Date(wedDate);
-      dayDate.setDate(wedDate.getDate() + d);
-      plan.getRange(PR.DAY_HDR, col)
-        .setValue(dayDate)
-        .setNumberFormat(`"${DAY_NAMES[d]}" M/D`)
-        .setHorizontalAlignment('center')
-        .setFontWeight('bold')
-        .setFontColor('#FFFFFF')
-        .setBackground('#4A2C17');
-    }
-  }
-
-  // Label cell
-  plan.getRange(PR.DAY_HDR, 1).setValue('Program')
-    .setBackground('#4A2C17').setFontColor('#FFFFFF').setFontWeight('bold');
-
+  _writeHeaderDates(plan);
   Logger.log('✓ Week dates updated (daily Wed–Sun)');
-}
-
-function sheet_mergeWeekHdr(sheet, row, startCol, label) {
-  try { sheet.getRange(row, startCol, 1, 5).breakApart(); } catch(e) {}
-  sheet.getRange(row, startCol, 1, 5).merge()
-    .setValue(label)
-    .setBackground('#2C1810').setFontColor('#FFFFFF')
-    .setFontWeight('bold').setHorizontalAlignment('center').setFontSize(10);
 }
 
 // Refreshes planner dropdown options from current inventory.

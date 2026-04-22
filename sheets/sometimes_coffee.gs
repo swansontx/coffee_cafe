@@ -12,7 +12,6 @@
 
 const SHEET_INV    = 'Inventory';
 const SHEET_PLAN   = 'Daily Planner';      // 20-day selection grid
-const SHEET_DASH   = 'Coverage Dashboard';
 const SHEET_STATUS = 'Program Planner';    // inventory summary by category
 
 // Inventory column indices — 0-based for array/getValues() access
@@ -62,15 +61,13 @@ function setupAll() {
   setupInventorySheet(ss);
   setupStatusSheet(ss);
   setupPlannerSheet(ss);
-  setupDashboardSheet(ss);
   refreshWeekDates();
   refreshDropdowns();
   SpreadsheetApp.getUi().alert(
     '✓ Sometimes Coffee is ready!\n\n' +
     '1. Inventory — add all your coffees here\n' +
-    '2. Program Planner — live counts/lbs by category\n' +
-    '3. Daily Planner — assign coffees day-by-day (20 working days)\n' +
-    '4. Coverage Dashboard — weekly coverage check\n\n' +
+    '2. Program Planner — planning horizon + pipeline status\n' +
+    '3. Daily Planner — assign coffees day-by-day (20 working days)\n\n' +
     'Every Monday: ☕ menu → Advance / Catch Up to Today'
   );
 }
@@ -433,126 +430,6 @@ function lbsEndVar(dropCell, dayCell, burnRateCell) {
     `br,${burnRateCell}/7,` +
     `dy,IF(AND(ISNUMBER(ac),ac<=${dayCell}),${dayCell}-ac,0),` +
     `MAX(0,ROUND(al-br*dy,1)))),"")`;
-}
-
-// ================================================================
-// SHEET 3: COVERAGE DASHBOARD
-// ================================================================
-
-function setupDashboardSheet(ss) {
-  let sheet = ss.getSheetByName(SHEET_DASH);
-  if (!sheet) sheet = ss.insertSheet(SHEET_DASH, 3);
-  else { sheet.clear(); sheet.clearConditionalFormatRules(); }
-
-  try { sheet.setFrozenRows(0);    } catch(e) {}
-  try { sheet.setFrozenColumns(0); } catch(e) {}
-  try { sheet.getRange(1,1,sheet.getMaxRows(),sheet.getMaxColumns()).breakApart(); } catch(e) {}
-
-  sheet.setColumnWidth(1, 185);
-  [2,3,4,5].forEach(c => sheet.setColumnWidth(c, 215));
-
-  // Dashboard shows one column per week, referencing the Wednesday (first day) of each week
-  // Planner week starts: col B (wk1), G (wk2), L (wk3), Q (wk4)
-  const WED_COLS = ['B','G','L','Q'];
-
-  sheet.getRange(1,1,1,5).setBackground('#2C1810').setFontColor('#FFFFFF').setFontWeight('bold');
-  sheet.getRange(1,1).setValue('Program');
-  WED_COLS.forEach((col, wi) =>
-    sheet.getRange(1, wi+2)
-      .setFormula(`='Daily Planner'!${col}${PR.DAY_HDR}`)
-      .setNumberFormat('"Wk" MMM D')
-      .setHorizontalAlignment('center').setFontWeight('bold').setFontColor('#FFFFFF'));
-
-  // Program rows
-  const P = "'Daily Planner'";
-  [
-    {row:2, name:'House Espresso',    dr:PR.HOUSE_DROP, lr:PR.HOUSE_LBS, br:13.6},
-    {row:3, name:'Featured Espresso', dr:PR.FEAT_DROP,  lr:PR.FEAT_LBS,  br:null, brr:PR.FEAT_BURN},
-    {row:4, name:'Batch Drip',        dr:PR.BATCH_DROP, lr:PR.BATCH_LBS, br:3.4},
-    {row:5, name:'Pour Over',         dr:PR.POUR_DROP,  lr:PR.POUR_LBS,  br:0.5},
-  ].forEach(prog => {
-    sheet.getRange(prog.row,1).setValue(prog.name).setFontWeight('bold');
-    sheet.setRowHeight(prog.row, 65);
-
-    WED_COLS.forEach((col, wi) => {
-      const coffee = `${P}!${col}${prog.dr}`;
-      const lbs    = `${P}!${col}${prog.lr}`;
-      const wk     = `${P}!${col}${PR.DAY_HDR}`;
-      const br     = prog.br
-        ? prog.br
-        : `IF(ISNUMBER(${P}!${col}${prog.brr}),${P}!${col}${prog.brr},2)`;
-
-      const status =
-        `IF(${coffee}="","Out",IFERROR(LET(` +
-        `l,IF(ISNUMBER(${lbs}),${lbs},0),` +
-        `rr,INDEX(Inventory!$R:$R,MATCH(${coffee},Inventory!$L:$L,0)),` +
-        `IF(AND(ISNUMBER(rr),rr>${wk}),"Not Brew-Ready",` +
-        `IF(l<=0,"Out",IF(l<${br},"Low","Covered")))),"Out"))`;
-
-      sheet.getRange(prog.row, wi+2)
-        .setFormula(
-          `=IF(${coffee}="","⚠ Nothing assigned",` +
-          `${coffee}&CHAR(10)&${status}&CHAR(10)&` +
-          `IF(ISNUMBER(${lbs}),TEXT(${lbs},"0.0")&" lbs",""))`)
-        .setWrap(true).setVerticalAlignment('middle').setHorizontalAlignment('center');
-    });
-  });
-
-  // Summary row
-  sheet.setRowHeight(6, 80);
-  sheet.getRange(6,1).setValue('Weekly Summary').setFontWeight('bold').setBackground('#F5F5F5');
-  WED_COLS.forEach((col, wi) => {
-    sheet.getRange(6, wi+2).setFormula(
-      `=LET(hl,IF(ISNUMBER(${P}!${col}${PR.HOUSE_LBS}),${P}!${col}${PR.HOUSE_LBS},0),` +
-      `fl,IF(ISNUMBER(${P}!${col}${PR.FEAT_LBS}),${P}!${col}${PR.FEAT_LBS},0),` +
-      `bl,IF(ISNUMBER(${P}!${col}${PR.BATCH_LBS}),${P}!${col}${PR.BATCH_LBS},0),` +
-      `pl,IF(ISNUMBER(${P}!${col}${PR.POUR_LBS}),${P}!${col}${PR.POUR_LBS},0),` +
-      `ho,AND(${P}!${col}${PR.HOUSE_DROP}<>"",hl>=13.6),` +
-      `fo,${P}!${col}${PR.FEAT_DROP}<>"",` +
-      `bo,AND(${P}!${col}${PR.BATCH_DROP}<>"",bl>=3.4),` +
-      `po,AND(${P}!${col}${PR.POUR_DROP}<>"",pl>=0.5),` +
-      `n,IF(ho,1,0)+IF(fo,1,0)+IF(bo,1,0)+IF(po,1,0),` +
-      `TEXT(n,"0")&"/4 programs covered"&` +
-      `IF(NOT(ho),CHAR(10)&"⚠ House Espresso","")&` +
-      `IF(NOT(fo),CHAR(10)&"⚠ Featured Espresso","")&` +
-      `IF(NOT(bo),CHAR(10)&"⚠ Batch Drip","")&` +
-      `IF(NOT(po),CHAR(10)&"⚠ Pour Over",""))`)
-      .setWrap(true).setBackground('#F5F5F5').setFontSize(9);
-  });
-
-  // Coverage conditional formatting
-  const cov = [sheet.getRange('B2:E5')];
-  const covRules = [
-    SpreadsheetApp.newConditionalFormatRule().whenTextContains('Covered').setBackground('#D4EDDA').setFontColor('#155724').setRanges(cov).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextContains('Low').setBackground('#FFF3CD').setFontColor('#856404').setRanges(cov).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextContains('Not Brew-Ready').setBackground('#CCE5FF').setFontColor('#004085').setRanges(cov).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextContains('Out').setBackground('#F8D7DA').setFontColor('#721C24').setRanges(cov).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextContains('Nothing assigned').setBackground('#F5C6CB').setFontColor('#721C24').setRanges(cov).build(),
-  ];
-
-  // Retail freshness section
-  sheet.getRange(8,1,1,5).merge().setValue('RETAIL FRESHNESS')
-    .setBackground('#1A3A2A').setFontColor('#FFFFFF').setFontWeight('bold').setFontSize(11);
-  sheet.getRange(9,1,1,5)
-    .setValues([['Coffee','Bags On Hand','Wks Supply','Days to Cutoff','Freshness Status']])
-    .setBackground('#2A5A3A').setFontColor('#FFFFFF').setFontWeight('bold');
-  sheet.getRange(10,1).setFormula(
-    '=IFERROR(SORT(FILTER(' +
-    '{Inventory!L2:L500,Inventory!Y2:Y500,Inventory!AF2:AF500,Inventory!AE2:AE500,Inventory!AG2:AG500},' +
-    '(Inventory!A2:A500="retail")*(Inventory!L2:L500<>"")),4,TRUE),' +
-    '{"No retail inventory yet","","","",""})');
-
-  const fresh = [sheet.getRange('E10:E60')];
-  sheet.setConditionalFormatRules([...covRules,
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('OK').setBackground('#D4EDDA').setFontColor('#155724').setRanges(fresh).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Watch').setBackground('#FFF3CD').setFontColor('#856404').setRanges(fresh).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Urgent').setBackground('#FFE8CC').setFontColor('#7D3A00').setRanges(fresh).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Expired').setBackground('#F8D7DA').setFontColor('#721C24').setRanges(fresh).build(),
-  ]);
-
-  sheet.setFrozenRows(1);
-  sheet.setFrozenColumns(1);
-  Logger.log('✓ Dashboard sheet ready');
 }
 
 // ================================================================

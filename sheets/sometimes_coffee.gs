@@ -705,10 +705,10 @@ function setupStatusSheet(ss) {
   try { sheet.setFrozenColumns(0); } catch(e) {}
   try { sheet.getRange(1,1,sheet.getMaxRows(),sheet.getMaxColumns()).breakApart(); } catch(e) {}
 
-  sheet.setColumnWidth(1, 170);
-  sheet.setColumnWidth(2, 85);
-  sheet.setColumnWidth(3, 110);
-  sheet.setColumnWidth(4, 135);
+  sheet.setColumnWidth(1, 155);
+  sheet.setColumnWidth(2, 165);
+  sheet.setColumnWidth(3, 165);
+  sheet.setColumnWidth(4, 165);
 
   const hdrBg = '#2C1810', hdrFg = '#FFFFFF';
   const subBg = '#4A2C17', subFg = '#FFFFFF';
@@ -745,31 +745,62 @@ function setupStatusSheet(ss) {
     if (i % 2 === 0) sheet.getRange(row, 1, 1, 4).setBackground('#FAFAFA');
   });
 
-  // ── Section 2: By Program ──
-  const p2 = 10;
+  // ── Section 2: Planning Horizon — Now / +2 Weeks / ~1 Month ──
+  // Each column references a different Wednesday in the Daily Planner:
+  //   Now      = week 1 Wed (col B)
+  //   +2 Weeks = week 3 Wed (col L)
+  //   ~1 Month = week 4 Wed (col Q)
+  const p2     = 10;
+  const P      = "'Daily Planner'";
+  const hCols  = [
+    colLetter(planCol(0, 0)),   // B  — Now
+    colLetter(planCol(2, 0)),   // L  — +2 Weeks
+    colLetter(planCol(3, 0)),   // Q  — ~1 Month
+  ];
+  const hLabels = ['Now', '+2 Weeks', '~1 Month'];
+
   sheet.getRange(p2,1,1,4).merge()
-    .setValue('BY PROGRAM')
+    .setValue('PLANNING HORIZON')
     .setBackground(hdrBg).setFontColor(hdrFg).setFontWeight('bold').setFontSize(12);
 
-  sheet.getRange(p2+1,1,1,4)
-    .setValues([['Program','Active Coffee(s)','Ready to Pull','In Pipeline (not Finished)']])
+  // Column headers: label + date pulled live from Daily Planner
+  sheet.getRange(p2+1, 1).setValue('Program')
     .setBackground(subBg).setFontColor(subFg).setFontWeight('bold');
+  hCols.forEach((col, j) => {
+    sheet.getRange(p2+1, j+2)
+      .setFormula(`="${hLabels[j]}"&CHAR(10)&IFERROR(TEXT(${P}!${col}${PR.DAY_HDR},"MMM d"),"")`)
+      .setBackground(subBg).setFontColor(subFg).setFontWeight('bold')
+      .setWrap(true).setHorizontalAlignment('center');
+  });
+  sheet.setRowHeight(p2+1, 36);
 
-  const programs = ['House Espresso','Featured Espresso','Batch Drip','Pour Over'];
-  programs.forEach((prog, i) => {
+  // Program rows — each cell: coffee name + status + lbs remaining
+  const progData = [
+    { name:'House Espresso',    dr:PR.HOUSE_DROP, lr:PR.HOUSE_LBS },
+    { name:'Featured Espresso', dr:PR.FEAT_DROP,  lr:PR.FEAT_LBS  },
+    { name:'Batch Drip',        dr:PR.BATCH_DROP, lr:PR.BATCH_LBS },
+    { name:'Pour Over',         dr:PR.POUR_DROP,  lr:PR.POUR_LBS  },
+  ];
+
+  const horizonRanges = [];
+  progData.forEach((prog, i) => {
     const row = p2 + 2 + i;
-    sheet.getRange(row, 1).setValue(prog).setFontWeight('bold');
-    sheet.getRange(row, 2).setFormula(
-      `=IFERROR(TEXTJOIN(", ",TRUE,FILTER(Inventory!L:L,` +
-      `(Inventory!A:A="brewing")*` +
-      `((Inventory!M:M="${prog}")+(Inventory!N:N="${prog}"))*(Inventory!X:X="Active"))),"—")`);
-    sheet.getRange(row, 3).setFormula(
-      `=IFERROR(TEXTJOIN(", ",TRUE,FILTER(Inventory!L:L,` +
-      `(Inventory!A:A="brewing")*` +
-      `((Inventory!M:M="${prog}")+(Inventory!N:N="${prog}"))*(Inventory!X:X="Ready"))),"—")`);
-    sheet.getRange(row, 4).setFormula(
-      `=COUNTIFS(Inventory!A:A,"brewing",Inventory!M:M,"${prog}",Inventory!X:X,"<>Finished")+` +
-      `COUNTIFS(Inventory!A:A,"brewing",Inventory!N:N,"${prog}",Inventory!X:X,"<>Finished")`);
+    sheet.setRowHeight(row, 60);
+    sheet.getRange(row, 1).setValue(prog.name).setFontWeight('bold').setVerticalAlignment('middle');
+
+    hCols.forEach((col, j) => {
+      const coffee = `${P}!${col}${prog.dr}`;
+      const lbs    = `${P}!${col}${prog.lr}`;
+      const status = `IFERROR(INDEX(Inventory!$X:$X,MATCH(${coffee},Inventory!$L:$L,0)),"")`;
+      const cell   = sheet.getRange(row, j+2);
+      cell.setFormula(
+        `=IF(${coffee}="","⚠ Not planned",` +
+        `${coffee}&CHAR(10)&${status}&` +
+        `IF(ISNUMBER(${lbs})," — "&TEXT(${lbs},"0.0")&" lbs",""))`)
+        .setWrap(true).setVerticalAlignment('middle').setHorizontalAlignment('center');
+      horizonRanges.push(cell);
+    });
+
     if (i % 2 === 0) sheet.getRange(row, 1, 1, 4).setBackground('#FAFAFA');
   });
 
@@ -807,9 +838,23 @@ function setupStatusSheet(ss) {
     .setBackground('#E8F6EE').setFontWeight('bold');
   sheet.getRange(totalRow, 3).setNumberFormat('0');
 
+  // Conditional formatting — planning horizon cells
+  const horizonRangeList = [sheet.getRange(p2+2, 2, 4, 3)];
+  const horizonRules = [
+    SpreadsheetApp.newConditionalFormatRule().whenTextContains('⚠ Not planned')
+      .setBackground('#FFF3CD').setFontColor('#856404').setRanges(horizonRangeList).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextContains('Active')
+      .setBackground('#D4EDDA').setFontColor('#155724').setRanges(horizonRangeList).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextContains('Ready')
+      .setBackground('#CCF5F1').setFontColor('#0C5460').setRanges(horizonRangeList).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextContains('Resting')
+      .setBackground('#E2D9F3').setFontColor('#4B2B7A').setRanges(horizonRangeList).build(),
+  ];
+
   // Conditional formatting — freshness label column
   const freshLabelRange = [sheet.getRange(`A${p3+2}:A${p3+5}`)];
   sheet.setConditionalFormatRules([
+    ...horizonRules,
     SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('OK')
       .setBackground('#D4EDDA').setFontColor('#155724').setRanges(freshLabelRange).build(),
     SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Watch')

@@ -263,8 +263,10 @@ function setupPlannerSheet(ss) {
     'Enter Featured Espresso burn rate in lbs/week.\n' +
     'Fill the Wednesday cell of each week — Thu–Sun auto-copy it.');
 
-  // Note row
-  sheet.getRange(PR.NOTE,1,1,21).merge()
+  // Note row — merge starts at col B (not A) so setFrozenColumns(1) doesn't
+  // hit a merge that spans the frozen/unfrozen column boundary
+  sheet.getRange(PR.NOTE, 1).setBackground('#F8F8F8');
+  sheet.getRange(PR.NOTE, 2, 1, 20).merge()
     .setValue('Fixed burn rates: House 13.6  |  Batch 3.4  |  Pour Over 0.5  (lbs/wk)  |  Featured: enter in each Wed cell')
     .setFontSize(8).setFontColor('#888888').setBackground('#F8F8F8');
 

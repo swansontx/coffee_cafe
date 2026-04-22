@@ -565,17 +565,13 @@ function refreshDropdowns() {
         const dayDate = dayDates[w][d];
         if (!dayDate) continue;
         const available = getAvailableCoffees(invData, prog.name, dayDate, prog.burnRate);
-        const cell = plan.getRange(prog.dropRow, planCol(w, d));
-        if (available.length === 0) {
-          cell.clearDataValidations();
-        } else {
-          cell.setDataValidation(
-            SpreadsheetApp.newDataValidation()
-              .requireValueInList(available, true)
-              .setAllowInvalid(false)
-              .build()
-          );
-        }
+        const list = available.length > 0 ? available : ['— none —'];
+        plan.getRange(prog.dropRow, planCol(w, d)).setDataValidation(
+          SpreadsheetApp.newDataValidation()
+            .requireValueInList(list, true)
+            .setAllowInvalid(available.length > 0 ? false : true)
+            .build()
+        );
       }
     }
   });

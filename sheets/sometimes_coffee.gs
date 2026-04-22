@@ -31,14 +31,14 @@ const IC = {
 // Row 1 = merged week group header, Row 2 = individual day headers
 const PR = {
   WEEK_HDR:1, DAY_HDR:2,
-  HOUSE_DROP:3, HOUSE_LBS:4,
-  FEAT_DROP:5,  FEAT_BURN:6, FEAT_LBS:7,
-  BATCH_DROP:8, BATCH_LBS:9,
-  POUR_DROP:10, POUR_LBS:11,
-  NOTE:13,
+  HOUSE_DROP:3, HOUSE_BURN:4,  HOUSE_LBS:5,
+  FEAT_DROP:6,  FEAT_BURN:7,   FEAT_LBS:8,
+  BATCH_DROP:9, BATCH_BURN:10, BATCH_LBS:11,
+  POUR_DROP:12, POUR_BURN:13,  POUR_LBS:14,
+  NOTE:16,
   // Hidden status rows — formula lookups from Inventory; used by CF rules
   // (Sheets CF cannot reference a different sheet, so we cache status here)
-  HOUSE_ST:14, FEAT_ST:15, BATCH_ST:16, POUR_ST:17
+  HOUSE_ST:17, FEAT_ST:18, BATCH_ST:19, POUR_ST:20
 };
 
 // 1-indexed column for week w (0–3) and day d (0–4, Wed–Sun)
@@ -206,7 +206,7 @@ function setupPlannerSheet(ss) {
   sheet.setRowHeight(PR.WEEK_HDR, 28);
   sheet.setRowHeight(PR.DAY_HDR, 32);
   [PR.HOUSE_DROP,PR.FEAT_DROP,PR.BATCH_DROP,PR.POUR_DROP].forEach(r => sheet.setRowHeight(r, 36));
-  [PR.HOUSE_LBS,PR.FEAT_BURN,PR.FEAT_LBS,PR.BATCH_LBS,PR.POUR_LBS].forEach(r => sheet.setRowHeight(r, 24));
+  [PR.HOUSE_BURN,PR.HOUSE_LBS,PR.FEAT_BURN,PR.FEAT_LBS,PR.BATCH_BURN,PR.BATCH_LBS,PR.POUR_BURN,PR.POUR_LBS].forEach(r => sheet.setRowHeight(r, 24));
 
   // Label column A
   sheet.getRange(PR.WEEK_HDR,1).setBackground('#2C1810');
@@ -216,13 +216,16 @@ function setupPlannerSheet(ss) {
   // Row labels and colors
   [
     [PR.HOUSE_DROP, 'House Espresso',       '#155724','#D4EDDA', true ],
+    [PR.HOUSE_BURN, '  burn rate (lbs/wk)','#4A7C59','#F0FAF3', false],
     [PR.HOUSE_LBS,  '  lbs remaining',      '#4A7C59','#F0FAF3', false],
     [PR.FEAT_DROP,  'Featured Espresso',    '#7D4A1F','#E8D5C4', true ],
     [PR.FEAT_BURN,  '  burn rate (lbs/wk)','#9B6940','#FBF0E7', false],
     [PR.FEAT_LBS,   '  lbs remaining',      '#9B6940','#FBF0E7', false],
     [PR.BATCH_DROP, 'Batch Drip',           '#0C5460','#D1ECF1', true ],
+    [PR.BATCH_BURN, '  burn rate (lbs/wk)','#2D7A8A','#E8F6F8', false],
     [PR.BATCH_LBS,  '  lbs remaining',      '#2D7A8A','#E8F6F8', false],
     [PR.POUR_DROP,  'Pour Over',            '#4B2B7A','#E2D9F3', true ],
+    [PR.POUR_BURN,  '  burn rate (lbs/wk)','#6B4A9A','#EDE8F5', false],
     [PR.POUR_LBS,   '  lbs remaining',      '#6B4A9A','#EDE8F5', false],
   ].forEach(([row,label,fg,bg,bold]) => {
     sheet.getRange(row,1).setValue(label).setFontColor(fg).setBackground(bg)
@@ -237,10 +240,10 @@ function setupPlannerSheet(ss) {
       const cl      = colLetter(col);
       const wk      = `${cl}${PR.DAY_HDR}`;
       const burnCol = colLetter(planCol(w, 0)); // always use that week's Wed burn rate
-      sheet.getRange(PR.HOUSE_LBS, col).setFormula(lbsEnd(`${cl}${PR.HOUSE_DROP}`,wk,13.6,'House Espresso',PR.HOUSE_DROP));
+      sheet.getRange(PR.HOUSE_LBS, col).setFormula(lbsEnd(`${cl}${PR.HOUSE_DROP}`,wk,`$B$${PR.HOUSE_BURN}`,'House Espresso',PR.HOUSE_DROP));
       sheet.getRange(PR.FEAT_LBS,  col).setFormula(lbsEndVar(`${cl}${PR.FEAT_DROP}`,wk,`${burnCol}${PR.FEAT_BURN}`,PR.FEAT_DROP));
-      sheet.getRange(PR.BATCH_LBS, col).setFormula(lbsEnd(`${cl}${PR.BATCH_DROP}`,wk,3.4,'Batch Drip',PR.BATCH_DROP));
-      sheet.getRange(PR.POUR_LBS,  col).setFormula(lbsEnd(`${cl}${PR.POUR_DROP}`,wk,0.5,'Pour Over',PR.POUR_DROP));
+      sheet.getRange(PR.BATCH_LBS, col).setFormula(lbsEnd(`${cl}${PR.BATCH_DROP}`,wk,`$B$${PR.BATCH_BURN}`,'Batch Drip',PR.BATCH_DROP));
+      sheet.getRange(PR.POUR_LBS,  col).setFormula(lbsEnd(`${cl}${PR.POUR_DROP}`,wk,`$B$${PR.POUR_BURN}`,'Pour Over',PR.POUR_DROP));
     }
   }
 
@@ -262,11 +265,26 @@ function setupPlannerSheet(ss) {
     'Enter Featured Espresso burn rate in lbs/week.\n' +
     'Fill the Wednesday cell of each week — Thu–Sun auto-copy it.');
 
+  // House / Batch / Pour burn rate rows — single value in col B, all 20 cols display it.
+  // User edits col B; lbs formulas reference $B$<burnRow> (absolute) so all days update.
+  [
+    [PR.HOUSE_BURN, 13.6, 'House Espresso burn rate (lbs/wk). Edit col B to change.'],
+    [PR.BATCH_BURN, 3.4,  'Batch Drip burn rate (lbs/wk). Edit col B to change.'],
+    [PR.POUR_BURN,  0.5,  'Pour Over burn rate (lbs/wk). Edit col B to change.'],
+  ].forEach(([burnRow, defaultRate, note]) => {
+    sheet.getRange(burnRow, 2).setValue(defaultRate);
+    sheet.getRange(burnRow, 1).setNote(note);
+    for (let col = 3; col <= 21; col++) {
+      sheet.getRange(burnRow, col).setFormula(`=$B$${burnRow}`);
+    }
+    sheet.getRange(burnRow, 2, 1, 20).setNumberFormat('0.0');
+  });
+
   // Note row — merge starts at col B (not A) so setFrozenColumns(1) doesn't
   // hit a merge that spans the frozen/unfrozen column boundary
   sheet.getRange(PR.NOTE, 1).setBackground('#F8F8F8');
   sheet.getRange(PR.NOTE, 2, 1, 20).merge()
-    .setValue('Fixed burn rates: House 13.6  |  Batch 3.4  |  Pour Over 0.5  (lbs/wk)  |  Featured: enter in each Wed cell')
+    .setValue('Burn rates are editable — change the "burn rate (lbs/wk)" row for each program. Featured: enter each Wed.')
     .setFontSize(8).setFontColor('#888888').setBackground('#F8F8F8');
 
   // Hidden status lookup rows (rows 14–17) — cache Inventory status per day column.
@@ -320,14 +338,10 @@ function setupPlannerSheet(ss) {
   const allLbsRanges = [PR.HOUSE_LBS, PR.FEAT_LBS, PR.BATCH_LBS, PR.POUR_LBS]
     .map(r => sheet.getRange(r, 2, 1, 20));
   const lbsLowRules = [
-    // House: 2 days = 2 × (13.6/7) ≈ 3.9 lbs
-    [PR.HOUSE_LBS, `=AND(B${PR.HOUSE_LBS}>0,B${PR.HOUSE_LBS}<(13.6/7)*2)`],
-    // Featured: burn rate entered per-week in FEAT_BURN row; Thu–Sun copy Wed value
+    [PR.HOUSE_LBS, `=AND(B${PR.HOUSE_LBS}>0,B${PR.HOUSE_LBS}<($B$${PR.HOUSE_BURN}/7)*2)`],
     [PR.FEAT_LBS,  `=AND(B${PR.FEAT_LBS}>0,B${PR.FEAT_LBS}<(B${PR.FEAT_BURN}/7)*2)`],
-    // Batch: 2 days = 2 × (3.4/7) ≈ 1.0 lbs
-    [PR.BATCH_LBS, `=AND(B${PR.BATCH_LBS}>0,B${PR.BATCH_LBS}<(3.4/7)*2)`],
-    // Pour Over: 2 days = 2 × (0.5/7) ≈ 0.14 lbs
-    [PR.POUR_LBS,  `=AND(B${PR.POUR_LBS}>0,B${PR.POUR_LBS}<(0.5/7)*2)`],
+    [PR.BATCH_LBS, `=AND(B${PR.BATCH_LBS}>0,B${PR.BATCH_LBS}<($B$${PR.BATCH_BURN}/7)*2)`],
+    [PR.POUR_LBS,  `=AND(B${PR.POUR_LBS}>0,B${PR.POUR_LBS}<($B$${PR.POUR_BURN}/7)*2)`],
   ].map(([row, formula]) =>
     SpreadsheetApp.newConditionalFormatRule()
       .whenFormulaSatisfied(formula)
@@ -535,11 +549,16 @@ function refreshDropdowns() {
     }
   }
 
+  const houseBurn = plan.getRange(PR.HOUSE_BURN, 2).getValue() || 13.6;
+  const batchBurn = plan.getRange(PR.BATCH_BURN, 2).getValue() || 3.4;
+  const pourBurn  = plan.getRange(PR.POUR_BURN,  2).getValue() || 0.5;
+  const featBurn  = plan.getRange(PR.FEAT_BURN, planCol(0, 0)).getValue() || 2;
+
   [
-    {name:'House Espresso',    burnRate:13.6, dropRow:PR.HOUSE_DROP},
-    {name:'Featured Espresso', burnRate:2,    dropRow:PR.FEAT_DROP },
-    {name:'Batch Drip',        burnRate:3.4,  dropRow:PR.BATCH_DROP},
-    {name:'Pour Over',         burnRate:0.5,  dropRow:PR.POUR_DROP },
+    {name:'House Espresso',    burnRate:houseBurn, dropRow:PR.HOUSE_DROP},
+    {name:'Featured Espresso', burnRate:featBurn,  dropRow:PR.FEAT_DROP },
+    {name:'Batch Drip',        burnRate:batchBurn, dropRow:PR.BATCH_DROP},
+    {name:'Pour Over',         burnRate:pourBurn,  dropRow:PR.POUR_DROP },
   ].forEach(prog => {
     for (let w = 0; w < 4; w++) {
       for (let d = 0; d < 5; d++) {

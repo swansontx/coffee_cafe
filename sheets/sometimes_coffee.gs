@@ -237,10 +237,10 @@ function setupPlannerSheet(ss) {
       const cl      = colLetter(col);
       const wk      = `${cl}${PR.DAY_HDR}`;
       const burnCol = colLetter(planCol(w, 0)); // always use that week's Wed burn rate
-      sheet.getRange(PR.HOUSE_LBS, col).setFormula(lbsEnd(`${cl}${PR.HOUSE_DROP}`,wk,13.6,'House Espresso'));
-      sheet.getRange(PR.FEAT_LBS,  col).setFormula(lbsEndVar(`${cl}${PR.FEAT_DROP}`,wk,`${burnCol}${PR.FEAT_BURN}`));
-      sheet.getRange(PR.BATCH_LBS, col).setFormula(lbsEnd(`${cl}${PR.BATCH_DROP}`,wk,3.4,'Batch Drip'));
-      sheet.getRange(PR.POUR_LBS,  col).setFormula(lbsEnd(`${cl}${PR.POUR_DROP}`,wk,0.5,'Pour Over'));
+      sheet.getRange(PR.HOUSE_LBS, col).setFormula(lbsEnd(`${cl}${PR.HOUSE_DROP}`,wk,13.6,'House Espresso',PR.HOUSE_DROP));
+      sheet.getRange(PR.FEAT_LBS,  col).setFormula(lbsEndVar(`${cl}${PR.FEAT_DROP}`,wk,`${burnCol}${PR.FEAT_BURN}`,PR.FEAT_DROP));
+      sheet.getRange(PR.BATCH_LBS, col).setFormula(lbsEnd(`${cl}${PR.BATCH_DROP}`,wk,3.4,'Batch Drip',PR.BATCH_DROP));
+      sheet.getRange(PR.POUR_LBS,  col).setFormula(lbsEnd(`${cl}${PR.POUR_DROP}`,wk,0.5,'Pour Over',PR.POUR_DROP));
     }
   }
 
@@ -408,26 +408,35 @@ function _writeHeaderDates(plan) {
 
 // Lbs remaining at a specific day — fixed burn rate program
 // dy = days since activation (Sheets dates are serial numbers, subtraction gives days directly)
-function lbsEnd(dropCell, dayCell, burnRate, programName) {
+// dropRow — row number of the program's drop row, used to find the first day
+// this coffee is assigned in the planner when no inventory activated date is set.
+function lbsEnd(dropCell, dayCell, burnRate, programName, dropRow) {
+  const dayRange  = `B$${PR.DAY_HDR}:U$${PR.DAY_HDR}`;
+  const dropRange = `B$${dropRow}:U$${dropRow}`;
   return `=IFERROR(IF(${dropCell}="","",LET(` +
     `r,MATCH(${dropCell},Inventory!$L:$L,0),` +
     `ip,INDEX(Inventory!$M:$M,r)="${programName}",` +
     `al,IF(ip,INDEX(Inventory!$O:$O,r),INDEX(Inventory!$P:$P,r)),` +
-    `ac,INDEX(Inventory!$U:$U,r),` +
-    `dy,IF(AND(ISNUMBER(ac),ac<=${dayCell}),${dayCell}-ac,0),` +
+    `ac_inv,INDEX(Inventory!$U:$U,r),` +
+    `ac_plan,IFERROR(INDEX(${dayRange},MATCH(${dropCell},${dropRange},0)),${dayCell}),` +
+    `ac,IF(AND(ISNUMBER(ac_inv),ac_inv<ac_plan),ac_inv,ac_plan),` +
+    `dy,MAX(0,${dayCell}-ac),` +
     `MAX(0,ROUND(al-(${burnRate}/7)*dy,1)))),"")`;
 }
 
 // Lbs remaining at a specific day — variable burn rate (Featured Espresso)
-// burnRateCell holds lbs/wk entered by user; divide by 7 for daily rate
-function lbsEndVar(dropCell, dayCell, burnRateCell) {
+function lbsEndVar(dropCell, dayCell, burnRateCell, dropRow) {
+  const dayRange  = `B$${PR.DAY_HDR}:U$${PR.DAY_HDR}`;
+  const dropRange = `B$${dropRow}:U$${dropRow}`;
   return `=IFERROR(IF(OR(${dropCell}="",${burnRateCell}=""),"",LET(` +
     `r,MATCH(${dropCell},Inventory!$L:$L,0),` +
     `ip,INDEX(Inventory!$M:$M,r)="Featured Espresso",` +
     `al,IF(ip,INDEX(Inventory!$O:$O,r),INDEX(Inventory!$P:$P,r)),` +
-    `ac,INDEX(Inventory!$U:$U,r),` +
+    `ac_inv,INDEX(Inventory!$U:$U,r),` +
+    `ac_plan,IFERROR(INDEX(${dayRange},MATCH(${dropCell},${dropRange},0)),${dayCell}),` +
+    `ac,IF(AND(ISNUMBER(ac_inv),ac_inv<ac_plan),ac_inv,ac_plan),` +
     `br,${burnRateCell}/7,` +
-    `dy,IF(AND(ISNUMBER(ac),ac<=${dayCell}),${dayCell}-ac,0),` +
+    `dy,MAX(0,${dayCell}-ac),` +
     `MAX(0,ROUND(al-br*dy,1)))),"")`;
 }
 

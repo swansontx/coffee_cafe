@@ -62,6 +62,7 @@ function setupAll() {
   setupStatusSheet(ss);
   setupPlannerSheet(ss);
   refreshWeekDates();
+  SpreadsheetApp.flush(); // commit all writes before refreshDropdowns reads dates back
   refreshDropdowns();
   SpreadsheetApp.getUi().alert(
     '✓ Sometimes Coffee is ready!\n\n' +

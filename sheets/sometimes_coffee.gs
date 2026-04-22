@@ -565,15 +565,17 @@ function refreshDropdowns() {
         const dayDate = dayDates[w][d];
         if (!dayDate) continue;
         const available = getAvailableCoffees(invData, prog.name, dayDate, prog.burnRate);
-        const list = available.length > 0 ? available : ['— nothing available —'];
-        const validation = SpreadsheetApp.newDataValidation()
-          .requireValueInList(list, true)
-          .setAllowInvalid(false)   // enforce: only listed coffees allowed
-          .setHelpText(available.length > 0
-            ? `${available.length} coffee(s) available for ${prog.name} this day`
-            : `No coffees available for ${prog.name} — check brew-ready date and lbs`)
-          .build();
-        plan.getRange(prog.dropRow, planCol(w, d)).setDataValidation(validation);
+        const cell = plan.getRange(prog.dropRow, planCol(w, d));
+        if (available.length === 0) {
+          cell.clearDataValidations();
+        } else {
+          cell.setDataValidation(
+            SpreadsheetApp.newDataValidation()
+              .requireValueInList(available, true)
+              .setAllowInvalid(false)
+              .build()
+          );
+        }
       }
     }
   });

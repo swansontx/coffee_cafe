@@ -94,15 +94,9 @@ file.
 ## 4. Set up Tier 1 (no code - saved search alerts)
 
 These platforms already have built-in saved-search email alerts - use them
-instead of scraping:
-- LoopNet, Crexi, CommercialCafe (lease/restaurant space)
-- BizBuySell, BizQuest (business-for-sale, filter category: Coffee & Tea
-  Shops / Restaurants)
-
-Log into each, search Portland metro / ~900-1,800 sqft / restaurant or
-food-service category, save the search, and point notifications at
-travis.what@gmail.com. Consider a Gmail filter that labels mail from these
-platforms so they're easy to scan separately from the Tier 2/3 digest.
+instead of scraping. Step-by-step, copy-paste-ready criteria for each of
+the 5 sites (LoopNet, Crexi, BizBuySell, BizQuest, CommercialCafe) are in
+[`TIER1_SAVED_SEARCHES.md`](TIER1_SAVED_SEARCHES.md).
 
 ## 5. Schedule it
 

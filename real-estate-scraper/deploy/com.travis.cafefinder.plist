@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.travis.cafefinder</string>
+
+  <!-- EDIT these two paths for your machine before loading this job:
+       - ProgramArguments[0]: output of `which node`
+       - the /path/to/real-estate-scraper below: where you cloned the repo -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/path/to/coffee_cafe/real-estate-scraper/src/runner.js</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/path/to/coffee_cafe/real-estate-scraper</string>
+
+  <!-- Runs once a day at 7:00am. StartCalendarInterval fires even if the
+       Mac was asleep at the scheduled time - it catches up on wake. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>7</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/path/to/coffee_cafe/real-estate-scraper/data/scrape.log</string>
+  <key>StandardErrorPath</key>
+  <string>/path/to/coffee_cafe/real-estate-scraper/data/scrape.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

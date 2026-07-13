@@ -172,6 +172,23 @@ on a schedule. To actually run this, one of:
    **This is the actual blocker for implementation** — everything else in
    this plan is ready to build.
 
+## 9a. Implementation Status
+
+The Tier 2/3 scraper, dedupe store, and digest emailer are built in
+[`real-estate-scraper/`](real-estate-scraper/) - see that folder's README
+for setup. Summary:
+- Craigslist RSS adapters (Tier 2): built, category codes need a quick
+  live-site check (see README §3).
+- 6 broker-site scrapers (Tier 3): framework built, each site stubbed with
+  a best-guess URL but `selectors: null` - needs ~10min per site on a
+  machine with real internet using the included `npm run inspect` helper
+  (see README §3). Deliberately not guessed blind, since fabricated
+  selectors would silently return nothing or wrong data.
+- Dedupe/stale-tracking store, budget/sqft/relevance filtering, SMTP digest
+  email, and a `launchd` schedule template: all built and unit-tested.
+- Tier 1 (saved-search alerts): no code needed, just account setup (README
+  §4) - not yet done.
+
 ## 9. Next Steps
 
 1. **Now, no code needed**: set up Tier 1 saved searches (LoopNet, Crexi,

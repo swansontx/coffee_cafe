@@ -1,0 +1,22 @@
+{
+  "name": "cafe-space-finder",
+  "version": "1.0.0",
+  "description": "Scrapes Portland-metro commercial real estate and business-for-sale listings for cafe/food space, emails a daily digest of new matches",
+  "main": "src/runner.js",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "scrape": "node src/runner.js",
+    "scrape:dry": "node src/runner.js --dry-run",
+    "inspect": "node src/inspect.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.2.2",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.5",
+    "nodemailer": "^6.9.13",
+    "rss-parser": "^3.13.0"
+  }
+}
